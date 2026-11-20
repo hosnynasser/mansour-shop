@@ -49,3 +49,27 @@ CREATE TABLE IF NOT EXISTS ledger (
 );
 CREATE INDEX IF NOT EXISTS idx_ledger_customer ON ledger(customer_id);
 CREATE INDEX IF NOT EXISTS idx_ledger_day ON ledger(day);
+CREATE TABLE IF NOT EXISTS quotes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    num TEXT UNIQUE,
+    ts TEXT,
+    day TEXT,
+    staff TEXT,
+    customer_name TEXT DEFAULT '',
+    customer_phone TEXT DEFAULT '',
+    subtotal REAL,
+    discount REAL DEFAULT 0,
+    total REAL,
+    status TEXT DEFAULT 'open',
+    invoice_id INTEGER
+);
+CREATE TABLE IF NOT EXISTS quote_items (
+    quote_id INTEGER,
+    code TEXT,
+    name TEXT,
+    price REAL,
+    qty INTEGER,
+    discount REAL DEFAULT 0,
+    line_total REAL
+);
+CREATE INDEX IF NOT EXISTS idx_qitems_quote ON quote_items(quote_id);

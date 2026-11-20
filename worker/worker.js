@@ -206,6 +206,19 @@ async function handle(request, env) {
         }
         const total = Math.round(lines.reduce((s, l) => s + l.lineTotal, 0) * 100) / 100;
         const id = 'MN-' + Date.now().toString(36).toUpperCase() + '-' + Math.random().toString(36).slice(2, 6).toUpperCase();
+        // خصم مخزون الـ POS للأصناف المتتبعة (لو قاعدة البيانات متاحة)
+        if (env.POS_DB) {
+            const { results: stockRows } = await env.POS_DB.prepare('SELECT code FROM stock').all();
+            const tracked = new Set((stockRows || []).map((r) => r.code));
+            const dec = lines.filter((l) => tracked.has(l.code));
+            if (dec.length) {
+                const stmts = dec.map((l) => env.POS_DB.prepare('UPDATE stock SET qty = qty - ? WHERE code = ? AND qty >= ?').bind(l.qty, l.code, l.qty));
+                const results = await env.POS_DB.batch(stmts);
+                for (let i = 0; i < dec.length; i++) {
+                    if ((results[i].meta?.changes ?? 0) === 0) return json({ error: 'out_of_stock', code: dec[i].code }, 400);
+                }
+            }
+        }
         const order = { id, ts: new Date().toISOString(), status: 'new', customer: { name, phone, address }, lines, total };
         await env.SHOP_KV.put('order:' + id, JSON.stringify(order));
         const idxRaw = await env.SHOP_KV.get('orders:index');
@@ -213,6 +226,7 @@ async function handle(request, env) {
         try { idx = idxRaw ? JSON.parse(idxRaw) : []; } catch { idx = []; }
         idx.unshift(id);
         await env.SHOP_KV.put('orders:index', JSON.stringify(idx.slice(0, 500)));
+        if (env.POS_DB) await syncStockFlags(env);
         return json({ ok: true, id, total });
     }
 
@@ -370,9 +384,9 @@ async function getCatalog(env) {
 
 async function posProducts(env) {
     const catalog = await getCatalog(env);
-    const { results } = await env.POS_DB.prepare('SELECT code, qty FROM stock').all();
-    const qty = new Map((results || []).map((r) => [r.code, r.qty]));
-    return catalog.map((p) => ({ name: p.name, code: p.code, price: p.price, cat: p.cat, stock: p.stock !== false, qty: qty.get(p.code) ?? 0 }));
+    const { results } = await env.POS_DB.prepare('SELECT code, qty, barcode FROM stock').all();
+    const info = new Map((results || []).map((r) => [r.code, r]));
+    return catalog.map((p) => ({ name: p.name, code: p.code, price: p.price, cat: p.cat, stock: p.stock !== false, qty: info.get(p.code)?.qty ?? 0, barcode: info.get(p.code)?.barcode || '' }));
 }
 
 async function handlePos(request, env, path) {
@@ -397,6 +411,7 @@ async function handlePos(request, env, path) {
         const qty = Math.max(0, Math.min(1000000, parseInt(body.qty, 10) || 0));
         if (!code) return json({ error: 'bad_fields' }, 400);
         await env.POS_DB.prepare('INSERT INTO stock (code, qty) VALUES (?, ?) ON CONFLICT(code) DO UPDATE SET qty = excluded.qty').bind(code, qty).run();
+        await syncStockFlags(env);
         return json({ ok: true, code, qty });
     }
 
@@ -404,60 +419,9 @@ async function handlePos(request, env, path) {
     if (path === '/api/pos/invoices' && request.method === 'POST') {
         let body;
         try { body = await request.json(); } catch { return json({ error: 'bad_json' }, 400); }
-        const items = Array.isArray(body.items) ? body.items.slice(0, 100) : [];
-        if (!items.length) return json({ error: 'empty_invoice' }, 400);
-        const payment = PAYMENTS.includes(body.payment) ? body.payment : 'cash';
-        let customerId = 0;
-        if (payment === 'debt' || body.customerId) {
-            customerId = parseInt(body.customerId, 10) || 0;
-            if (payment === 'debt' && !customerId) return json({ error: 'customer_required' }, 400);
-            if (customerId) {
-                const cust = await env.POS_DB.prepare('SELECT id, name, phone FROM customers WHERE id = ?').bind(customerId).first();
-                if (!cust) return json({ error: 'unknown_customer' }, 400);
-                body.customerName = body.customerName || cust.name;
-                body.customerPhone = body.customerPhone || cust.phone || '';
-            }
-        }
-        const catalog = await getCatalog(env);
-        const byCode = new Map(catalog.map((p) => [p.code, p]));
-
-        const lines = [];
-        for (const it of items) {
-            const p = byCode.get(clean(it.code, 40));
-            if (!p) return json({ error: 'unknown_product', code: clean(it.code, 40) }, 400);
-            const qty = Math.max(1, Math.min(9999, parseInt(it.qty, 10) || 1));
-            const disc = Math.max(0, Math.min(1e9, Number(it.discount) || 0));
-            const lineTotal = Math.max(0, Math.round((p.price * qty - disc) * 100) / 100);
-            lines.push({ code: p.code, name: p.name, price: p.price, qty, discount: Math.round(disc * 100) / 100, lineTotal });
-        }
-        const subtotal = Math.round(lines.reduce((s, l) => s + l.lineTotal, 0) * 100) / 100;
-        const invDisc = Math.max(0, Math.min(subtotal, Number(body.discount) || 0));
-        const total = Math.round((subtotal - invDisc) * 100) / 100;
-
-        // إنقاص المخزون بشكل ذرّي: أي صنف كميته مش كفاية يوقف العملية كلها
-        const stmts = [];
-        for (const l of lines) {
-            stmts.push(env.POS_DB.prepare("UPDATE stock SET qty = qty - ? WHERE code = ? AND qty >= ?").bind(l.qty, l.code, l.qty));
-        }
-        stmts.push(env.POS_DB.prepare("INSERT INTO invoices (num, ts, day, staff, payment, subtotal, discount, total, status, customer_name, customer_phone) VALUES ('', '', '', '', '', 0, 0, 0, 'pending', '', '')"));
-        const results = await env.POS_DB.batch(stmts);
-        for (let i = 0; i < lines.length; i++) {
-            if ((results[i].meta?.changes ?? 0) === 0) return json({ error: 'insufficient_stock', code: lines[i].code }, 400);
-        }
-        const invoiceId = results[results.length - 1].meta.last_row_id;
-        const num = 'INV-' + String(invoiceId).padStart(6, '0');
-        const ts = new Date().toISOString();
-        let day = ts.slice(0, 10);
-        try { day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()); } catch {}
-        const itemStmts = lines.map((l) => env.POS_DB.prepare('INSERT INTO invoice_items (invoice_id, code, name, price, qty, discount, line_total) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(invoiceId, l.code, l.name, l.price, l.qty, l.discount, l.lineTotal));
-        itemStmts.push(env.POS_DB.prepare("UPDATE invoices SET num = ?, ts = ?, day = ?, staff = ?, payment = ?, subtotal = ?, discount = ?, total = ?, status = 'completed', customer_name = ?, customer_phone = ?, customer_id = ? WHERE id = ?")
-            .bind(num, ts, day, staff.user, payment, subtotal, Math.round(invDisc * 100) / 100, total, clean(body.customerName, 120), clean(body.customerPhone, 30), customerId || null, invoiceId));
-        if (payment === 'debt') {
-            itemStmts.push(env.POS_DB.prepare("INSERT INTO ledger (customer_id, ts, day, kind, amount, invoice_id, staff, note) VALUES (?, ?, ?, 'charge', ?, ?, ?, '')")
-                .bind(customerId, ts, day, total, invoiceId, staff.user));
-        }
-        await env.POS_DB.batch(itemStmts);
-        return json({ ok: true, id: invoiceId, num, ts, total });
+        const r = await createInvoiceCore(env, staff.user, body);
+        if (r.error) return json(r, r.status);
+        return json(r);
     }
 
     // قائمة الفواتير (الكاشير يشوف فواتيره بس، المدير يشوف الكل)
@@ -496,6 +460,7 @@ async function handlePos(request, env, path) {
         stmts.push(env.POS_DB.prepare("UPDATE invoices SET status = 'voided' WHERE id = ?").bind(id));
         stmts.push(env.POS_DB.prepare("DELETE FROM ledger WHERE invoice_id = ? AND kind = 'charge'").bind(id));
         await env.POS_DB.batch(stmts);
+        await syncStockFlags(env);
         return json({ ok: true });
     }
 
@@ -606,5 +571,186 @@ async function handlePos(request, env, path) {
         return json({ from, to, summary: sum, top: top || [], byStaff: byStaff || [], debtsOutstanding: debts?.outstanding ?? 0, topDebtors: topDebtors || [], collectedInRange: collected?.c ?? 0 });
     }
 
+
+    // ---- الباركود: المدير بيربط باركود بصنف ----
+    if (path === '/api/pos/barcode' && request.method === 'POST') {
+        if (!manager) return json({ error: 'forbidden' }, 403);
+        let body;
+        try { body = await request.json(); } catch { return json({ error: 'bad_json' }, 400); }
+        const code = clean(body.code, 40);
+        const barcode = clean(body.barcode, 60);
+        if (!code || !barcode) return json({ error: 'bad_fields' }, 400);
+        const catalog = await getCatalog(env);
+        if (!catalog.some((p) => p.code === code)) return json({ error: 'unknown_product' }, 400);
+        await env.POS_DB.prepare('INSERT INTO stock (code, qty, barcode) VALUES (?, 0, ?) ON CONFLICT(code) DO UPDATE SET barcode = excluded.barcode').bind(code, barcode).run();
+        return json({ ok: true });
+    }
+
+    // ---- عروض الأسعار ----
+    if (path === '/api/pos/quotes' && request.method === 'POST') {
+        let body;
+        try { body = await request.json(); } catch { return json({ error: 'bad_json' }, 400); }
+        const items = Array.isArray(body.items) ? body.items.slice(0, 100) : [];
+        if (!items.length) return json({ error: 'empty_quote' }, 400);
+        const catalog = await getCatalog(env);
+        const byCode = new Map(catalog.map((p) => [p.code, p]));
+        const lines = [];
+        for (const it of items) {
+            const p = byCode.get(clean(it.code, 40));
+            if (!p) return json({ error: 'unknown_product', code: clean(it.code, 40) }, 400);
+            const qty = Math.max(1, Math.min(9999, parseInt(it.qty, 10) || 1));
+            const disc = Math.max(0, Math.min(1e9, Number(it.discount) || 0));
+            const lineTotal = Math.max(0, Math.round((p.price * qty - disc) * 100) / 100);
+            lines.push({ code: p.code, name: p.name, price: p.price, qty, discount: Math.round(disc * 100) / 100, lineTotal });
+        }
+        const subtotal = Math.round(lines.reduce((s, l) => s + l.lineTotal, 0) * 100) / 100;
+        const qDisc = Math.max(0, Math.min(subtotal, Number(body.discount) || 0));
+        const total = Math.round((subtotal - qDisc) * 100) / 100;
+        const r = await env.POS_DB.prepare("INSERT INTO quotes (num, ts, day, staff, customer_name, customer_phone, subtotal, discount, total, status) VALUES ('', '', '', '', '', '', 0, 0, 0, 'open')").run();
+        const qid = r.meta.last_row_id;
+        const num = 'QT-' + String(qid).padStart(6, '0');
+        const ts = new Date().toISOString();
+        const day = cairoDay();
+        const stmts = lines.map((l) => env.POS_DB.prepare('INSERT INTO quote_items (quote_id, code, name, price, qty, discount, line_total) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(qid, l.code, l.name, l.price, l.qty, l.discount, l.lineTotal));
+        stmts.push(env.POS_DB.prepare('UPDATE quotes SET num = ?, ts = ?, day = ?, staff = ?, customer_name = ?, customer_phone = ?, subtotal = ?, discount = ?, total = ? WHERE id = ?')
+            .bind(num, ts, day, staff.user, clean(body.customerName, 120), clean(body.customerPhone, 30), subtotal, Math.round(qDisc * 100) / 100, total, qid));
+        await env.POS_DB.batch(stmts);
+        return json({ ok: true, id: qid, num, ts, total });
+    }
+
+    if (path === '/api/pos/quotes' && request.method === 'GET') {
+        const url = new URL(request.url);
+        const all = manager && url.searchParams.get('all') === '1';
+        let sql = 'SELECT id, num, ts, staff, customer_name, customer_phone, subtotal, discount, total, status, invoice_id FROM quotes';
+        const args = [];
+        if (!manager || !all) { sql += ' WHERE staff = ?'; args.push(staff.user); }
+        sql += ' ORDER BY id DESC LIMIT 200';
+        const { results } = await env.POS_DB.prepare(sql).bind(...args).all();
+        return json({ quotes: results || [] });
+    }
+
+    if (path.startsWith('/api/pos/quote/') && request.method === 'GET' && !path.endsWith('/convert') && !path.endsWith('/cancel')) {
+        const id = parseInt(path.slice('/api/pos/quote/'.length), 10) || 0;
+        const quote = await env.POS_DB.prepare('SELECT * FROM quotes WHERE id = ?').bind(id).first();
+        if (!quote) return json({ error: 'not_found' }, 404);
+        if (!manager && quote.staff !== staff.user) return json({ error: 'forbidden' }, 403);
+        const { results: items } = await env.POS_DB.prepare('SELECT code, name, price, qty, discount, line_total FROM quote_items WHERE quote_id = ?').bind(id).all();
+        return json({ quote, items: items || [] });
+    }
+
+    // تحويل العرض لفاتورة بيع حقيقية (بينقص المخزون ويسجل الدفع)
+    if (path.startsWith('/api/pos/quote/') && path.endsWith('/convert') && request.method === 'POST') {
+        const id = parseInt(path.slice('/api/pos/quote/'.length, -'/convert'.length), 10) || 0;
+        const quote = await env.POS_DB.prepare('SELECT * FROM quotes WHERE id = ?').bind(id).first();
+        if (!quote) return json({ error: 'not_found' }, 404);
+        if (!manager && quote.staff !== staff.user) return json({ error: 'forbidden' }, 403);
+        if (quote.status !== 'open') return json({ error: 'not_open' }, 400);
+        let body;
+        try { body = await request.json(); } catch { body = {}; }
+        const { results: items } = await env.POS_DB.prepare('SELECT code, qty, discount FROM quote_items WHERE quote_id = ?').bind(id).all();
+        const r = await createInvoiceCore(env, staff.user, {
+            items: (items || []).map((l) => ({ code: l.code, qty: l.qty, discount: l.discount })),
+            payment: body.payment || 'cash',
+            discount: quote.discount,
+            customerId: body.customerId,
+            customerName: quote.customer_name,
+            customerPhone: quote.customer_phone,
+        });
+        if (r.error) return json(r, r.status);
+        await env.POS_DB.prepare("UPDATE quotes SET status = 'converted', invoice_id = ? WHERE id = ? AND status = 'open'").bind(r.id, id).run();
+        return json(r);
+    }
+
+    if (path.startsWith('/api/pos/quote/') && path.endsWith('/cancel') && request.method === 'POST') {
+        const id = parseInt(path.slice('/api/pos/quote/'.length, -'/cancel'.length), 10) || 0;
+        const quote = await env.POS_DB.prepare('SELECT id, staff, status FROM quotes WHERE id = ?').bind(id).first();
+        if (!quote) return json({ error: 'not_found' }, 404);
+        if (!manager && quote.staff !== staff.user) return json({ error: 'forbidden' }, 403);
+        if (quote.status !== 'open') return json({ error: 'not_open' }, 400);
+        await env.POS_DB.prepare("UPDATE quotes SET status = 'canceled' WHERE id = ?").bind(id).run();
+        return json({ ok: true });
+    }
+
     return json({ error: 'not_found' }, 404);
+}
+
+function cairoDay() {
+    try { return new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()); } catch { return new Date().toISOString().slice(0, 10); }
+}
+
+// مزامنة توفر الأصناف على الموقع مع كميات الـ POS: الموقع يظهر "نفدت" لما الكمية توصل صفر
+async function syncStockFlags(env) {
+    try {
+        const kvProds = await getProducts(env);
+        if (!kvProds) return; // الكتالوج لسه مترفعش من لوحة التحكم
+        const { results } = await env.POS_DB.prepare('SELECT code, qty FROM stock').all();
+        const qty = new Map((results || []).map((r) => [r.code, r.qty]));
+        let changed = false;
+        const updated = kvProds.map((p) => {
+            if (!qty.has(p.code)) return p; // صنف مش متتبع في الـ POS
+            const avail = (qty.get(p.code) ?? 0) > 0;
+            if ((p.stock !== false) === avail) return p;
+            changed = true;
+            return { ...p, stock: avail };
+        });
+        if (changed) await env.SHOP_KV.put('products', JSON.stringify(updated));
+    } catch {}
+}
+
+// قلب إنشاء الفاتورة — بيستخدمه البيع العادي وتحويل عرض السعر
+async function createInvoiceCore(env, staffUser, body) {
+    const items = Array.isArray(body.items) ? body.items.slice(0, 100) : [];
+    if (!items.length) return { error: 'empty_invoice', status: 400 };
+    const payment = PAYMENTS.includes(body.payment) ? body.payment : 'cash';
+    let customerId = 0;
+    if (payment === 'debt' || body.customerId) {
+        customerId = parseInt(body.customerId, 10) || 0;
+        if (payment === 'debt' && !customerId) return { error: 'customer_required', status: 400 };
+        if (customerId) {
+            const cust = await env.POS_DB.prepare('SELECT id, name, phone FROM customers WHERE id = ?').bind(customerId).first();
+            if (!cust) return { error: 'unknown_customer', status: 400 };
+            body.customerName = body.customerName || cust.name;
+            body.customerPhone = body.customerPhone || cust.phone || '';
+        }
+    }
+    const catalog = await getCatalog(env);
+    const byCode = new Map(catalog.map((p) => [p.code, p]));
+
+    const lines = [];
+    for (const it of items) {
+        const p = byCode.get(clean(it.code, 40));
+        if (!p) return { error: 'unknown_product', code: clean(it.code, 40), status: 400 };
+        const qty = Math.max(1, Math.min(9999, parseInt(it.qty, 10) || 1));
+        const disc = Math.max(0, Math.min(1e9, Number(it.discount) || 0));
+        const lineTotal = Math.max(0, Math.round((p.price * qty - disc) * 100) / 100);
+        lines.push({ code: p.code, name: p.name, price: p.price, qty, discount: Math.round(disc * 100) / 100, lineTotal });
+    }
+    const subtotal = Math.round(lines.reduce((s, l) => s + l.lineTotal, 0) * 100) / 100;
+    const invDisc = Math.max(0, Math.min(subtotal, Number(body.discount) || 0));
+    const total = Math.round((subtotal - invDisc) * 100) / 100;
+
+    // إنقاص المخزون بشكل ذرّي: أي صنف كميته مش كفاية يوقف العملية كلها
+    const stmts = [];
+    for (const l of lines) {
+        stmts.push(env.POS_DB.prepare("UPDATE stock SET qty = qty - ? WHERE code = ? AND qty >= ?").bind(l.qty, l.code, l.qty));
+    }
+    stmts.push(env.POS_DB.prepare("INSERT INTO invoices (num, ts, day, staff, payment, subtotal, discount, total, status, customer_name, customer_phone) VALUES ('', '', '', '', '', 0, 0, 0, 'pending', '', '')"));
+    const results = await env.POS_DB.batch(stmts);
+    for (let i = 0; i < lines.length; i++) {
+        if ((results[i].meta?.changes ?? 0) === 0) return { error: 'insufficient_stock', code: lines[i].code, status: 400 };
+    }
+    const invoiceId = results[results.length - 1].meta.last_row_id;
+    const num = 'INV-' + String(invoiceId).padStart(6, '0');
+    const ts = new Date().toISOString();
+    const day = cairoDay();
+    const itemStmts = lines.map((l) => env.POS_DB.prepare('INSERT INTO invoice_items (invoice_id, code, name, price, qty, discount, line_total) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(invoiceId, l.code, l.name, l.price, l.qty, l.discount, l.lineTotal));
+    itemStmts.push(env.POS_DB.prepare("UPDATE invoices SET num = ?, ts = ?, day = ?, staff = ?, payment = ?, subtotal = ?, discount = ?, total = ?, status = 'completed', customer_name = ?, customer_phone = ?, customer_id = ? WHERE id = ?")
+        .bind(num, ts, day, staffUser, payment, subtotal, Math.round(invDisc * 100) / 100, total, clean(body.customerName, 120), clean(body.customerPhone, 30), customerId || null, invoiceId));
+    if (payment === 'debt') {
+        itemStmts.push(env.POS_DB.prepare("INSERT INTO ledger (customer_id, ts, day, kind, amount, invoice_id, staff, note) VALUES (?, ?, ?, 'charge', ?, ?, ?, '')")
+            .bind(customerId, ts, day, total, invoiceId, staffUser));
+    }
+    await env.POS_DB.batch(itemStmts);
+    await syncStockFlags(env);
+    return { ok: true, id: invoiceId, num, ts, total };
 }

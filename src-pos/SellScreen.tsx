@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import { api, fmt, CartLine, Customer, Invoice, Product } from './lib';
+import ScannerModal from './ScannerModal';
 
 export default function SellScreen({
     products, onDone, onNeedRefresh, notify,
@@ -64,6 +65,29 @@ export default function SellScreen({
         } catch { notify('مشكلة في إضافة العميل', true); }
     };
 
+    const [scanOpen, setScanOpen] = useState(false);
+    const onScanned = (code: string) => {
+        setScanOpen(false);
+        const c = code.toLowerCase();
+        const p = products.find((x) => ((x as any).barcode || '').toLowerCase() === c || x.code.toLowerCase() === c);
+        if (p) { addLine(p); notify('اتضاف: ' + p.name + ' ✓'); }
+        else notify('الباركود ده مش متسجل لأي صنف', true);
+    };
+
+    const saveQuote = async () => {
+        if (!cart.length || busy) return;
+        setBusy(true);
+        try {
+            const r = await api('/api/pos/quotes', 'POST', {
+                items: cart.map((l) => ({ code: l.code, qty: l.qty, discount: l.discount })),
+                discount: disc, customerName: custName.trim(), customerPhone: custPhone.trim(),
+            });
+            setCart([]); setCartOpen(false); setInvDisc(''); setCustName(''); setCustPhone(''); setCustId(0); setCustQ('');
+            notify('اتحفظ عرض السعر ' + r.num + ' ✓ — تلاقيه في شاشة الفواتير');
+        } catch { notify('مشكلة في حفظ العرض، جرب تاني', true); }
+        setBusy(false);
+    };
+
     const submit = async () => {
         if (!cart.length || busy) return;
         if (payment === 'debt' && !custId) { notify('اختار العميل اللي هيسجل عليه الآجل', true); return; }
@@ -110,6 +134,7 @@ export default function SellScreen({
                         inputMode="search"
                     />
                     {q ? <button className="btn-ghost btn btn-sm" onClick={() => { setQ(''); searchRef.current?.focus(); }}>مسح</button> : null}
+                    <button className="btn btn-navy btn-sm" onClick={() => setScanOpen(true)} title="قارئ الباركود">📷</button>
                 </div>
             </div>
 
@@ -209,14 +234,18 @@ export default function SellScreen({
                                 ) : null}
                             </div>
                         </div>
-                        <div style={{ padding: '12px 18px calc(14px + env(safe-area-inset-bottom))', borderTop: '1px solid var(--line)' }}>
+                        <div style={{ padding: '12px 18px calc(14px + env(safe-area-inset-bottom))', borderTop: '1px solid var(--line)', display: 'grid', gap: 8 }}>
                             <button className="btn btn-amber btn-block" disabled={busy || !cart.length} onClick={submit}>
                                 {busy ? 'جاري التسجيل…' : `✅ تسجيل البيع — ${fmt(total)} ج`}
+                            </button>
+                            <button className="btn btn-ghost btn-block" disabled={busy || !cart.length} onClick={saveQuote}>
+                                💾 حفظ كعرض سعر (من غير ما ينقص المخزون)
                             </button>
                         </div>
                     </div>
                 </>
             ) : null}
+            {scanOpen ? <ScannerModal title="امسح باركود الصنف" onScan={onScanned} onClose={() => setScanOpen(false)} /> : null}
         </>
     );
 }

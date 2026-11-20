@@ -60,7 +60,22 @@ export function fmtTime(ts: string): string {
     } catch { return ts; }
 }
 
-export const paymentLabel = (p: string) => (p === 'vcash' ? 'فودافون كاش' : p === 'debt' ? 'آجل' : 'كاش');
+export const paymentLabel = (p: string) => (p === 'vcash' ? 'فودافون كاش' : p === 'debt' ? 'آجل' : p === 'quote' ? 'عرض سعر' : 'كاش');
+
+export interface Quote {
+    id: number; num: string; ts: string; staff: string;
+    customer_name: string; customer_phone: string;
+    subtotal: number; discount: number; total: number;
+    status: 'open' | 'converted' | 'canceled'; invoice_id: number | null;
+}
+export function quoteAsInvoice(q: Quote): Invoice {
+    return {
+        id: q.id, num: q.num, ts: q.ts, staff: q.staff, payment: 'quote',
+        subtotal: q.subtotal, discount: q.discount, total: q.total,
+        status: q.status === 'canceled' ? 'voided' : 'completed',
+        customer_name: q.customer_name, customer_phone: q.customer_phone,
+    };
+}
 
 export function buildWaText(inv: Invoice, items: InvoiceItem[]): string {
     const L: string[] = [];
@@ -76,7 +91,8 @@ export function buildWaText(inv: Invoice, items: InvoiceItem[]): string {
     L.push('الإجمالي قبل الخصم: ' + fmt(inv.subtotal) + ' ج');
     if (inv.discount > 0) L.push('الخصم: ' + fmt(inv.discount) + ' ج');
     L.push('✅ الإجمالي: ' + fmt(inv.total) + ' ج');
-    L.push('طريقة الدفع: ' + paymentLabel(inv.payment));
+    if (inv.payment === 'quote') L.push('ℹ️ ده عرض سعر — الأسعار سارية وقت الإرسال');
+    else L.push('طريقة الدفع: ' + paymentLabel(inv.payment));
     if (inv.payment === 'debt') L.push('⚠️ الحساب ده اتسجل آجل على العميل');
     L.push('شكراً لتعاملكم معنا 🌟');
     L.push('📞 ' + SHOP_PHONE);

@@ -1,41 +1,62 @@
 import { useEffect, useState } from 'react';
-import { api, cairoToday, fmt, fmtTime, paymentLabel, Customer, Invoice, LedgerEntry, Product, Report, Role, Staff } from './lib';
+import { api, cairoToday, fmt, fmtTime, paymentLabel, Customer, Invoice, LedgerEntry, Product, Quote, Report, Role, Staff } from './lib';
+import ScannerModal from './ScannerModal';
 
 // ---------- فواتير ----------
-export function InvoicesScreen({ staff, openInvoice, notify }: { staff: Staff; openInvoice: (id: number) => void; notify: (m: string, b?: boolean) => void }) {
+export function InvoicesScreen({ staff, openInvoice, openQuote, notify }: { staff: Staff; openInvoice: (id: number) => void; openQuote: (id: number) => void; notify: (m: string, b?: boolean) => void }) {
     const [list, setList] = useState<Invoice[]>([]);
-    const [all, setAll] = useState(false);
+    const [quotes, setQuotes] = useState<Quote[]>([]);
+    const [view, setView] = useState<'mine' | 'all' | 'quotes'>('mine');
     const [loading, setLoading] = useState(true);
     const manager = staff.role === 'manager';
 
     const load = async () => {
         setLoading(true);
         try {
-            const r = await api('/api/pos/invoices' + (manager && all ? '?all=1' : ''));
-            setList(r.invoices || []);
-        } catch { notify('مشكلة في تحميل الفواتير', true); }
+            if (view === 'quotes') {
+                const r = await api('/api/pos/quotes' + (manager ? '?all=1' : ''));
+                setQuotes(r.quotes || []);
+            } else {
+                const r = await api('/api/pos/invoices' + (manager && view === 'all' ? '?all=1' : ''));
+                setList(r.invoices || []);
+            }
+        } catch { notify('مشكلة في التحميل', true); }
         setLoading(false);
     };
-    useEffect(() => { load(); }, [all]);
+    useEffect(() => { load(); }, [view]);
+
+    const qBadge = (st: string) => (st === 'converted' ? '✅ اتحولت لفاتورة' : st === 'canceled' ? '❌ ملغي' : '🕐 مفتوح');
 
     return (
         <>
-            {manager ? (
-                <div className="pay-toggle" style={{ marginBottom: 12 }}>
-                    <button className={!all ? 'on' : ''} onClick={() => setAll(false)}>فواتيري</button>
-                    <button className={all ? 'on' : ''} onClick={() => setAll(true)}>كل الفواتير</button>
-                </div>
-            ) : null}
-            {loading ? <div className="empty">جاري التحميل…</div> : list.length === 0 ? <div className="empty">مفيش فواتير لسه</div> : list.map((v) => (
-                <button key={v.id} className="inv-row" style={{ width: '100%', border: '1.5px solid var(--line)', textAlign: 'start' }} onClick={() => openInvoice(v.id)}>
-                    <div className={v.status === 'voided' ? 'voided' : ''}>
-                        <div className="n">{v.num} {v.status === 'voided' ? '(ملغاة)' : ''}</div>
-                        <div className="m">{fmtTime(v.ts)} · {v.staff}{v.customer_name ? ' · ' + v.customer_name : ''}</div>
-                    </div>
-                    <span className={'badge ' + (v.payment === 'vcash' ? 'vcash' : 'cash')}>{paymentLabel(v.payment)}</span>
-                    <span className={'amt' + (v.status === 'voided' ? ' voided' : '')}>{fmt(v.total)} ج</span>
-                </button>
-            ))}
+            <div className="pay-toggle" style={{ marginBottom: 12 }}>
+                <button className={view === 'mine' ? 'on' : ''} onClick={() => setView('mine')}>فواتيري</button>
+                {manager ? <button className={view === 'all' ? 'on' : ''} onClick={() => setView('all')}>كل الفواتير</button> : null}
+                <button className={view === 'quotes' ? 'on' : ''} onClick={() => setView('quotes')}>💾 عروض الأسعار</button>
+            </div>
+            {view === 'quotes' ? (
+                loading ? <div className="empty">جاري التحميل…</div> : quotes.length === 0 ? <div className="empty">مفيش عروض أسعار لسه — احفظ واحد من السلة بزرار 💾</div> : quotes.map((q) => (
+                    <button key={q.id} className="inv-row" style={{ width: '100%', border: '1.5px solid var(--line)', textAlign: 'start' }} onClick={() => openQuote(q.id)}>
+                        <div>
+                            <div className="n">{q.num}</div>
+                            <div className="m">{fmtTime(q.ts)} · {q.staff}{q.customer_name ? ' · ' + q.customer_name : ''}</div>
+                            <div className="m" style={{ fontSize: 11 }}>{qBadge(q.status)}{q.status === 'converted' && q.invoice_id ? '' : ''}</div>
+                        </div>
+                        <span className="amt">{fmt(q.total)} ج</span>
+                    </button>
+                ))
+            ) : (
+                loading ? <div className="empty">جاري التحميل…</div> : list.length === 0 ? <div className="empty">مفيش فواتير لسه</div> : list.map((v) => (
+                    <button key={v.id} className="inv-row" style={{ width: '100%', border: '1.5px solid var(--line)', textAlign: 'start' }} onClick={() => openInvoice(v.id)}>
+                        <div className={v.status === 'voided' ? 'voided' : ''}>
+                            <div className="n">{v.num} {v.status === 'voided' ? '(ملغاة)' : ''}</div>
+                            <div className="m">{fmtTime(v.ts)} · {v.staff}{v.customer_name ? ' · ' + v.customer_name : ''}</div>
+                        </div>
+                        <span className={'badge ' + (v.payment === 'vcash' ? 'vcash' : 'cash')}>{paymentLabel(v.payment)}</span>
+                        <span className={'amt' + (v.status === 'voided' ? ' voided' : '')}>{fmt(v.total)} ج</span>
+                    </button>
+                ))
+            )}
         </>
     );
 }
@@ -46,6 +67,16 @@ export function StockScreen({ staff, products, refresh, notify }: { staff: Staff
     const [q, setQ] = useState('');
     const [edit, setEdit] = useState<Record<string, string>>({});
     const [busy, setBusy] = useState('');
+    const [scanFor, setScanFor] = useState<string | null>(null);
+
+    const saveBarcode = async (code: string, barcode: string) => {
+        setScanFor(null);
+        try {
+            await api('/api/pos/barcode', 'POST', { code, barcode });
+            refresh();
+            notify('اتربط الباركود بالصنف ✓');
+        } catch { notify('مشكلة في حفظ الباركود', true); }
+    };
     const s = q.trim().toLowerCase();
     const filtered = s ? products.filter((p) => p.name.toLowerCase().includes(s) || p.code.toLowerCase().includes(s)) : products;
 
@@ -75,9 +106,10 @@ export function StockScreen({ staff, products, refresh, notify }: { staff: Staff
             {!manager ? <div className="err-box" style={{ background: '#fff8ea', color: 'var(--amber-d)' }}>عرض فقط — تعديل الأرصدة للمدير</div> : null}
             {filtered.map((p) => (
                 <div className="stock-row" key={p.code}>
-                    <div className="sn">{p.name}<span>{p.code}</span></div>
+                    <div className="sn">{p.name}<span>{p.code}{(p as any).barcode ? ' · 🏷️ ' + (p as any).barcode : ''}</span></div>
                     {manager ? (
                         <>
+                            <button className="btn btn-ghost btn-sm" onClick={() => setScanFor(p.code)} title="ربط باركود">📷</button>
                             <input
                                 inputMode="numeric"
                                 value={edit[p.code] !== undefined ? edit[p.code] : String(p.qty)}
@@ -92,6 +124,7 @@ export function StockScreen({ staff, products, refresh, notify }: { staff: Staff
                     )}
                 </div>
             ))}
+            {scanFor ? <ScannerModal title={'باركود: ' + scanFor} onScan={(code) => saveBarcode(scanFor, code)} onClose={() => setScanFor(null)} /> : null}
         </>
     );
 }

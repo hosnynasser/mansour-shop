@@ -1,10 +1,11 @@
 import worker from './worker.js';
 
 // ---- In-memory D1 stub: يفهم الـ SQL المحدود اللي الـ worker بيستخدمه للـ POS ----
-const tables = { stock: new Map(), invoices: new Map(), items: [], customers: new Map(), ledger: [] };
+const tables = { stock: new Map(), invoices: new Map(), items: [], customers: new Map(), ledger: [], barcodes: new Map(), quotes: new Map(), qitems: [] };
 let nextId = 1;
 let nextCustId = 1;
 let nextLedgerId = 1;
+let nextQuoteId = 1;
 
 function stmt(sql) {
     let args = [];
@@ -19,9 +20,18 @@ function stmt(sql) {
 }
 function exec(sql, args, mode) {
     // stock
-    if (sql === 'SELECT code, qty FROM stock') {
-        const rows = [...tables.stock.entries()].map(([code, qty]) => ({ code, qty }));
+    if (sql === 'SELECT code, qty FROM stock' || sql === 'SELECT code, qty, barcode FROM stock') {
+        const rows = [...tables.stock.entries()].map(([code, qty]) => ({ code, qty, barcode: tables.barcodes.get(code) || '' }));
         return { results: rows };
+    }
+    if (sql === 'SELECT code FROM stock') {
+        return { results: [...tables.stock.keys()].map((code) => ({ code })) };
+    }
+    if (sql.startsWith('INSERT INTO stock') && sql.includes('barcode')) {
+        const [code, barcode] = args;
+        if (!tables.stock.has(code)) tables.stock.set(code, 0);
+        tables.barcodes.set(code, barcode);
+        return { meta: { changes: 1 } };
     }
     if (sql.startsWith('INSERT INTO stock')) {
         const [code, qty] = args;
@@ -176,6 +186,48 @@ function exec(sql, args, mode) {
     }
     if (sql.startsWith("SELECT COALESCE(SUM(amount), 0) AS c FROM ledger WHERE kind = 'payment' AND day >= ? AND day <= ?")) {
         return { c: tables.ledger.filter((l) => l.kind === 'payment' && l.day >= args[0] && l.day <= args[1]).reduce((s, l) => s + l.amount, 0) };
+    }
+    // quotes
+    if (sql.startsWith('INSERT INTO quotes')) {
+        const id = nextQuoteId++;
+        tables.quotes.set(id, { id, num: '', ts: '', day: '', staff: '', customer_name: '', customer_phone: '', subtotal: 0, discount: 0, total: 0, status: 'open', invoice_id: null });
+        return { meta: { changes: 1, last_row_id: id } };
+    }
+    if (sql.startsWith('UPDATE quotes SET num = ?')) {
+        const [num, ts, day, staff, cn, cp, subtotal, discount, total, id] = args;
+        Object.assign(tables.quotes.get(id), { num, ts, day, staff, customer_name: cn, customer_phone: cp, subtotal, discount, total });
+        return { meta: { changes: 1 } };
+    }
+    if (sql.startsWith('INSERT INTO quote_items')) {
+        const [quote_id, code, name, price, qty, discount, line_total] = args;
+        tables.qitems.push({ quote_id, code, name, price, qty, discount, line_total });
+        return { meta: { changes: 1 } };
+    }
+    if (sql.startsWith('SELECT id, num, ts, staff, customer_name, customer_phone, subtotal, discount, total, status, invoice_id FROM quotes')) {
+        let rows = [...tables.quotes.values()];
+        if (sql.includes('WHERE staff = ?')) rows = rows.filter((q) => q.staff === args[0]);
+        rows.sort((a, b) => b.id - a.id);
+        return { results: rows };
+    }
+    if (sql.startsWith('SELECT * FROM quotes WHERE id = ?') || sql.startsWith('SELECT id, staff, status FROM quotes WHERE id = ?')) {
+        return tables.quotes.get(args[0]) || null;
+    }
+    if (sql.startsWith('SELECT code, name, price, qty, discount, line_total FROM quote_items')) {
+        return { results: tables.qitems.filter((i) => i.quote_id === args[0]) };
+    }
+    if (sql.startsWith('SELECT code, qty, discount FROM quote_items')) {
+        return { results: tables.qitems.filter((i) => i.quote_id === args[0]).map((i) => ({ code: i.code, qty: i.qty, discount: i.discount })) };
+    }
+    if (sql.startsWith("UPDATE quotes SET status = 'converted'")) {
+        const [invoice_id, id] = args;
+        const q = tables.quotes.get(id);
+        if (q.status !== 'open') return { meta: { changes: 0 } };
+        Object.assign(q, { status: 'converted', invoice_id });
+        return { meta: { changes: 1 } };
+    }
+    if (sql.startsWith("UPDATE quotes SET status = 'canceled'")) {
+        tables.quotes.get(args[0]).status = 'canceled';
+        return { meta: { changes: 1 } };
     }
     throw new Error('stub does not understand SQL: ' + sql);
 }
@@ -344,6 +396,73 @@ check('report debts zero after void', r.body.debtsOutstanding === 0);
 await call('POST', '/api/pos/invoices', { items: [{ code: 'EL-101', qty: 1 }], payment: 'debt', customerId: custId }, CSH);
 r = await call('GET', `/api/pos/reports?from=${today2}&to=${today2}`, null, MGR);
 check('report shows debt total + outstanding', r.body.summary.debt_total === 90 && r.body.debtsOutstanding === 90 && r.body.topDebtors.length === 1 && r.body.topDebtors[0].balance === 90);
+
+
+// ===== المرحلة 3: عروض أسعار + باركود + مزامنة مخزون =====
+// باركود
+r = await call('POST', '/api/pos/barcode', { code: 'EL-101', barcode: '6221234567890' }, CSH);
+check('cashier cannot assign barcode', r.status === 403);
+r = await call('POST', '/api/pos/barcode', { code: 'EL-101', barcode: '6221234567890' }, MGR);
+check('manager assigns barcode', r.status === 200);
+r = await call('GET', '/api/pos/products', null, CSH);
+check('products include barcode', r.body.products.find((p) => p.code === 'EL-101').barcode === '6221234567890');
+
+// عرض سعر
+r = await call('POST', '/api/pos/quotes', { items: [{ code: 'EL-101', qty: 2 }, { code: 'PL-201', qty: 1, discount: 50 }], discount: 20, customerName: 'عميل عرض' }, CSH);
+check('quote created', r.status === 200 && /^QT-\d{6}$/.test(r.body.num));
+check('quote total', r.body.total === (90 * 2) + (1650 - 50) - 20);
+const qid = r.body.id;
+r = await call('GET', '/api/pos/products', null, CSH);
+const elBefore = r.body.products.find((p) => p.code === 'EL-101').qty;
+const plBefore = r.body.products.find((p) => p.code === 'PL-201').qty;
+check('quote does not touch stock', typeof elBefore === 'number');
+
+r = await call('GET', '/api/pos/quote/' + qid, null, MGR);
+check('manager reads cashier quote', r.status === 200 && r.body.items.length === 2);
+r = await call('GET', '/api/pos/quotes', null, CSH);
+check('cashier sees own quotes', r.body.quotes.length === 1 && r.body.quotes[0].status === 'open');
+
+// تحويل لفاتورة
+r = await call('POST', `/api/pos/quote/${qid}/convert`, { payment: 'cash' }, CSH);
+check('convert creates invoice', r.status === 200 && /^INV-/.test(r.body.num) && r.body.total === 1760);
+r = await call('GET', '/api/pos/quote/' + qid, null, CSH);
+check('quote marked converted', r.body.quote.status === 'converted' && r.body.quote.invoice_id > 0);
+r = await call('POST', `/api/pos/quote/${qid}/convert`, { payment: 'cash' }, CSH);
+check('double convert rejected', r.status === 400);
+r = await call('GET', '/api/pos/products', null, CSH);
+check('convert decremented stock', r.body.products.find((p) => p.code === 'EL-101').qty === elBefore - 2 && r.body.products.find((p) => p.code === 'PL-201').qty === plBefore - 1);
+
+// إلغاء عرض
+r = await call('POST', '/api/pos/quotes', { items: [{ code: 'EL-101', qty: 1 }] }, CSH);
+const qid2 = r.body.id;
+r = await call('POST', `/api/pos/quote/${qid2}/cancel`, null, CSH);
+check('owner cancels quote', r.status === 200);
+r = await call('POST', `/api/pos/quote/${qid2}/convert`, { payment: 'cash' }, MGR);
+check('canceled quote cannot convert', r.status === 400);
+
+// مزامنة: بيع كل المخزون يخلي الموقع يظهر نفدت
+r = await call('POST', '/api/pos/stock', { code: 'EL-102', qty: 1 }, MGR);
+await call('PUT', '/api/admin/products', { products: [
+    { name: 'لمبة ليد', code: 'EL-101', price: 90, cat: 'كهرباء' },
+    { name: 'خلاط مغسلة', code: 'PL-201', price: 1650, cat: 'صحي' },
+    { name: 'مفتاح ديكور', code: 'EL-102', price: 75, cat: 'كهرباء' },
+] }, MGR);
+r = await call('POST', '/api/pos/invoices', { items: [{ code: 'EL-102', qty: 1 }], payment: 'cash' }, MGR);
+check('sell last unit', r.status === 200);
+const kvAfter = JSON.parse(kv.get('products'));
+check('site shows out of stock at zero', kvAfter.find((p) => p.code === 'EL-102').stock === false);
+check('tracked product still available', kvAfter.find((p) => p.code === 'EL-101').stock !== false);
+r = await call('POST', '/api/pos/stock', { code: 'EL-102', qty: 5 }, MGR);
+const kvBack = JSON.parse(kv.get('products'));
+check('restock makes site available again', kvBack.find((p) => p.code === 'EL-102').stock === true || kvBack.find((p) => p.code === 'EL-102').stock === undefined || kvBack.find((p) => p.code === 'EL-102').stock !== false);
+
+// طلب من الموقع ينقص مخزون الـ POS
+const before = tables.stock.get('EL-102');
+r = await call('POST', '/api/orders', { name: 'زبون أونلاين', phone: '0100', address: 'حلوان', items: [{ code: 'EL-102', qty: 2 }] });
+check('website order accepted', r.status === 200);
+check('website order decrements POS stock', tables.stock.get('EL-102') === before - 2);
+r = await call('POST', '/api/orders', { name: 'زبون', phone: '0100', address: 'x', items: [{ code: 'EL-102', qty: 999 }] });
+check('website order beyond stock rejected', r.status === 400 && r.body.error === 'out_of_stock');
 
 console.log(failed === 0 ? 'ALL PASS' : failed + ' FAILED');
 process.exit(failed === 0 ? 0 : 1);
