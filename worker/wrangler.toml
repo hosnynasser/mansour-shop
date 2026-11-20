@@ -1,0 +1,7 @@
+name = "mansour-shop-api"
+main = "worker.js"
+compatibility_date = "2026-11-20"
+
+[[kv_namespaces]]
+binding = "SHOP_KV"
+id = "PUT_KV_NAMESPACE_ID_HERE"
