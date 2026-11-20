@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { api, buildWaText, clearCred, cred, fmt, fmtTime, paymentLabel, quoteAsInvoice, saveCred, Customer, Invoice, InvoiceItem, Product, Quote, Staff } from './lib';
 import SellScreen from './SellScreen';
@@ -134,6 +134,31 @@ export default function App() {
     const notify = useCallback((msg: string, bad = false) => {
         setToast({ msg, bad });
         setTimeout(() => setToast(null), 3200);
+    }, []);
+    // الرجوع بالسحب من حرف الشاشة (زرار الرجوع بتاع الموبايل): يقفل أعلى طبقة بدل ما يخرج من التطبيق
+    const navRef = useRef({ tab, sub, done, staff: !!staff });
+    navRef.current = { tab, sub, done, staff: !!staff };
+    useEffect(() => {
+        history.pushState({ pos: 1 }, '');
+        let exitArm = 0;
+        const onPop = () => {
+            const n = navRef.current;
+            if (!n.staff) return;
+            const backs = document.querySelectorAll<HTMLElement>('.sheet-back');
+            let handled = true;
+            if (n.done) setDone(null);
+            else if (backs.length) backs[backs.length - 1].click();
+            else if (n.sub !== 'menu') setSub('menu');
+            else if (n.tab !== 'sell') setTab('sell');
+            else handled = false;
+            if (handled) { history.pushState({ pos: 1 }, ''); return; }
+            if (Date.now() - exitArm < 2000) { history.back(); return; }
+            exitArm = Date.now();
+            history.pushState({ pos: 1 }, '');
+            notify('اسحب تاني للخروج');
+        };
+        window.addEventListener('popstate', onPop);
+        return () => window.removeEventListener('popstate', onPop);
     }, []);
 
     const refreshProducts = useCallback(async () => {
@@ -374,7 +399,6 @@ export default function App() {
                                 <button className="btn btn-ghost btn-block" onClick={() => setPrintJob({ ...detail, mode: 'a4' })}>📄 طباعة / PDF (A4)</button>
                                 <button className="btn btn-wa btn-block" onClick={() => waShare(detail.inv, detail.items)}>إرسال واتساب</button>
                                 <SharePdf inv={detail.inv} items={detail.items} logo={logo} notify={notify} />
-                                <button className="btn btn-ghost btn-block" onClick={() => sysShare(detail.inv, detail.items)}>📤 مشاركة</button>
                                 {manager && detail.inv.status !== 'voided' ? <button className="btn btn-danger btn-block" onClick={() => voidInvoice(detail.inv.id)}>إلغاء الفاتورة</button> : null}
                             </div>
                         </div>
