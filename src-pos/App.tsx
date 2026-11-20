@@ -361,7 +361,6 @@ export default function App() {
                                 <button className="btn btn-ghost btn-block" onClick={() => setPrintJob({ ...done, mode: 'a4' })}>📄 طباعة / PDF (A4)</button>
                                 <button className="btn btn-wa btn-block" onClick={() => waShare(done.inv, done.items)}>إرسال واتساب</button>
                                 <SharePdf inv={done.inv} items={done.items} logo={logo} notify={notify} />
-                                <button className="btn btn-ghost btn-block" onClick={() => sysShare(done.inv, done.items)}>📤 مشاركة</button>
                                 {manager ? <button className="btn btn-danger btn-block" onClick={() => voidInvoice(done.inv.id)}>إلغاء الفاتورة</button> : null}
                                 <button className="btn btn-amber btn-block" onClick={() => setDone(null)}>🛒 بيع جديد</button>
                             </div>
