@@ -362,7 +362,7 @@ export default {
 };
 
 // ================= POS / الكاشير (بياناته في D1: POS_DB) =================
-const PAYMENTS = ['cash', 'vcash'];
+const PAYMENTS = ['cash', 'vcash', 'debt'];
 
 async function getCatalog(env) {
     return (await getProducts(env)) || EMBEDDED_PRODUCTS;
@@ -407,6 +407,17 @@ async function handlePos(request, env, path) {
         const items = Array.isArray(body.items) ? body.items.slice(0, 100) : [];
         if (!items.length) return json({ error: 'empty_invoice' }, 400);
         const payment = PAYMENTS.includes(body.payment) ? body.payment : 'cash';
+        let customerId = 0;
+        if (payment === 'debt' || body.customerId) {
+            customerId = parseInt(body.customerId, 10) || 0;
+            if (payment === 'debt' && !customerId) return json({ error: 'customer_required' }, 400);
+            if (customerId) {
+                const cust = await env.POS_DB.prepare('SELECT id, name, phone FROM customers WHERE id = ?').bind(customerId).first();
+                if (!cust) return json({ error: 'unknown_customer' }, 400);
+                body.customerName = body.customerName || cust.name;
+                body.customerPhone = body.customerPhone || cust.phone || '';
+            }
+        }
         const catalog = await getCatalog(env);
         const byCode = new Map(catalog.map((p) => [p.code, p]));
 
@@ -439,8 +450,12 @@ async function handlePos(request, env, path) {
         let day = ts.slice(0, 10);
         try { day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()); } catch {}
         const itemStmts = lines.map((l) => env.POS_DB.prepare('INSERT INTO invoice_items (invoice_id, code, name, price, qty, discount, line_total) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(invoiceId, l.code, l.name, l.price, l.qty, l.discount, l.lineTotal));
-        itemStmts.push(env.POS_DB.prepare("UPDATE invoices SET num = ?, ts = ?, day = ?, staff = ?, payment = ?, subtotal = ?, discount = ?, total = ?, status = 'completed', customer_name = ?, customer_phone = ? WHERE id = ?")
-            .bind(num, ts, day, staff.user, payment, subtotal, Math.round(invDisc * 100) / 100, total, clean(body.customerName, 120), clean(body.customerPhone, 30), invoiceId));
+        itemStmts.push(env.POS_DB.prepare("UPDATE invoices SET num = ?, ts = ?, day = ?, staff = ?, payment = ?, subtotal = ?, discount = ?, total = ?, status = 'completed', customer_name = ?, customer_phone = ?, customer_id = ? WHERE id = ?")
+            .bind(num, ts, day, staff.user, payment, subtotal, Math.round(invDisc * 100) / 100, total, clean(body.customerName, 120), clean(body.customerPhone, 30), customerId || null, invoiceId));
+        if (payment === 'debt') {
+            itemStmts.push(env.POS_DB.prepare("INSERT INTO ledger (customer_id, ts, day, kind, amount, invoice_id, staff, note) VALUES (?, ?, ?, 'charge', ?, ?, ?, '')")
+                .bind(customerId, ts, day, total, invoiceId, staff.user));
+        }
         await env.POS_DB.batch(itemStmts);
         return json({ ok: true, id: invoiceId, num, ts, total });
     }
@@ -479,6 +494,7 @@ async function handlePos(request, env, path) {
         const { results: items } = await env.POS_DB.prepare('SELECT code, qty FROM invoice_items WHERE invoice_id = ?').bind(id).all();
         const stmts = (items || []).map((l) => env.POS_DB.prepare('INSERT INTO stock (code, qty) VALUES (?, ?) ON CONFLICT(code) DO UPDATE SET qty = qty + excluded.qty').bind(l.code, l.qty));
         stmts.push(env.POS_DB.prepare("UPDATE invoices SET status = 'voided' WHERE id = ?").bind(id));
+        stmts.push(env.POS_DB.prepare("DELETE FROM ledger WHERE invoice_id = ? AND kind = 'charge'").bind(id));
         await env.POS_DB.batch(stmts);
         return json({ ok: true });
     }
@@ -494,6 +510,100 @@ async function handlePos(request, env, path) {
         sql += ' GROUP BY staff ORDER BY total DESC';
         const { results } = await env.POS_DB.prepare(sql).bind(...args).all();
         return json({ date, rows: results || [] });
+    }
+
+
+    // ---- العملاء والمديونيات ----
+    if (path === '/api/pos/customers' && request.method === 'GET') {
+        const { results } = await env.POS_DB.prepare("SELECT c.id, c.name, c.phone, c.notes, COALESCE((SELECT SUM(CASE WHEN l.kind = 'charge' THEN l.amount ELSE -l.amount END) FROM ledger l WHERE l.customer_id = c.id), 0) AS balance FROM customers c ORDER BY c.name").all();
+        return json({ customers: results || [] });
+    }
+
+    if (path === '/api/pos/customers' && request.method === 'POST') {
+        let body;
+        try { body = await request.json(); } catch { return json({ error: 'bad_json' }, 400); }
+        const name = clean(body.name, 120);
+        if (name.length < 2) return json({ error: 'bad_fields' }, 400);
+        const r = await env.POS_DB.prepare('INSERT INTO customers (name, phone, notes, created_at) VALUES (?, ?, ?, ?)')
+            .bind(name, clean(body.phone, 30), clean(body.notes, 500), new Date().toISOString()).run();
+        return json({ ok: true, id: r.meta.last_row_id });
+    }
+
+    if (path === '/api/pos/customers' && request.method === 'PATCH') {
+        if (!manager) return json({ error: 'forbidden' }, 403);
+        const url = new URL(request.url);
+        const id = parseInt(url.searchParams.get('id'), 10) || 0;
+        let body;
+        try { body = await request.json(); } catch { return json({ error: 'bad_json' }, 400); }
+        const name = clean(body.name, 120);
+        if (!id || name.length < 2) return json({ error: 'bad_fields' }, 400);
+        await env.POS_DB.prepare('UPDATE customers SET name = ?, phone = ?, notes = ? WHERE id = ?')
+            .bind(name, clean(body.phone, 30), clean(body.notes, 500), id).run();
+        return json({ ok: true });
+    }
+
+    if (path === '/api/pos/customers' && request.method === 'DELETE') {
+        if (!manager) return json({ error: 'forbidden' }, 403);
+        const url = new URL(request.url);
+        const id = parseInt(url.searchParams.get('id'), 10) || 0;
+        const cnt = await env.POS_DB.prepare('SELECT COUNT(*) AS n FROM ledger WHERE customer_id = ?').bind(id).first();
+        if ((cnt?.n ?? 0) > 0) return json({ error: 'has_ledger' }, 400);
+        await env.POS_DB.prepare('DELETE FROM customers WHERE id = ?').bind(id).run();
+        return json({ ok: true });
+    }
+
+    // كارت عميل: بياناته + كشف حساب + فواتيره
+    if (path.startsWith('/api/pos/customer/') && request.method === 'GET' && !path.endsWith('/payment')) {
+        const id = parseInt(path.slice('/api/pos/customer/'.length), 10) || 0;
+        const customer = await env.POS_DB.prepare('SELECT id, name, phone, notes FROM customers WHERE id = ?').bind(id).first();
+        if (!customer) return json({ error: 'not_found' }, 404);
+        const { results: ledger } = await env.POS_DB.prepare('SELECT id, ts, kind, amount, invoice_id, staff, note FROM ledger WHERE customer_id = ? ORDER BY id DESC LIMIT 100').bind(id).all();
+        const bal = await env.POS_DB.prepare("SELECT COALESCE(SUM(CASE WHEN kind = 'charge' THEN amount ELSE -amount END), 0) AS b FROM ledger WHERE customer_id = ?").bind(id).first();
+        const { results: invoices } = await env.POS_DB.prepare("SELECT id, num, ts, staff, payment, total, status FROM invoices WHERE customer_id = ? AND status != 'pending' ORDER BY id DESC LIMIT 50").bind(id).all();
+        return json({ customer, ledger: ledger || [], balance: bal?.b ?? 0, invoices: invoices || [] });
+    }
+
+    // تسجيل دفعة من عميل (الكاشير يقدر — تحصيل فلوس شغلانه)
+    if (path.startsWith('/api/pos/customer/') && path.endsWith('/payment') && request.method === 'POST') {
+        const id = parseInt(path.slice('/api/pos/customer/'.length, -'/payment'.length), 10) || 0;
+        let body;
+        try { body = await request.json(); } catch { return json({ error: 'bad_json' }, 400); }
+        const amount = Math.round((Number(body.amount) || 0) * 100) / 100;
+        if (amount <= 0 || amount > 1e7) return json({ error: 'bad_amount' }, 400);
+        const customer = await env.POS_DB.prepare('SELECT id FROM customers WHERE id = ?').bind(id).first();
+        if (!customer) return json({ error: 'not_found' }, 404);
+        const method = body.method === 'vcash' ? 'vcash' : 'cash';
+        const ts = new Date().toISOString();
+        let day = ts.slice(0, 10);
+        try { day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()); } catch {}
+        await env.POS_DB.prepare("INSERT INTO ledger (customer_id, ts, day, kind, amount, invoice_id, staff, note) VALUES (?, ?, ?, 'payment', ?, NULL, ?, ?)")
+            .bind(id, ts, day, amount, staff.user, clean(body.note, 200)).run();
+        const bal = await env.POS_DB.prepare("SELECT COALESCE(SUM(CASE WHEN kind = 'charge' THEN amount ELSE -amount END), 0) AS b FROM ledger WHERE customer_id = ?").bind(id).first();
+        return json({ ok: true, balance: bal?.b ?? 0 });
+    }
+
+    // حذف قيد دفعة غلط (مدير فقط)
+    if (path.startsWith('/api/pos/ledger/') && request.method === 'DELETE') {
+        if (!manager) return json({ error: 'forbidden' }, 403);
+        const id = parseInt(path.slice('/api/pos/ledger/'.length), 10) || 0;
+        await env.POS_DB.prepare("DELETE FROM ledger WHERE id = ? AND kind = 'payment'").bind(id).run();
+        return json({ ok: true });
+    }
+
+    // ---- التقارير (مدير فقط) ----
+    if (path === '/api/pos/reports' && request.method === 'GET') {
+        if (!manager) return json({ error: 'forbidden' }, 403);
+        const url = new URL(request.url);
+        const from = clean(url.searchParams.get('from'), 10);
+        const to = clean(url.searchParams.get('to'), 10);
+        if (!from || !to) return json({ error: 'missing_range' }, 400);
+        const sum = await env.POS_DB.prepare("SELECT COUNT(*) AS count, COALESCE(SUM(total), 0) AS total, COALESCE(SUM(CASE WHEN payment = 'cash' THEN total ELSE 0 END), 0) AS cash_total, COALESCE(SUM(CASE WHEN payment = 'vcash' THEN total ELSE 0 END), 0) AS vcash_total, COALESCE(SUM(CASE WHEN payment = 'debt' THEN total ELSE 0 END), 0) AS debt_total, COALESCE(SUM(discount), 0) AS discounts FROM invoices WHERE status = 'completed' AND day >= ? AND day <= ?").bind(from, to).first();
+        const { results: top } = await env.POS_DB.prepare("SELECT ii.name, ii.code, SUM(ii.qty) AS qty, SUM(ii.line_total) AS revenue FROM invoice_items ii JOIN invoices i ON i.id = ii.invoice_id WHERE i.status = 'completed' AND i.day >= ? AND i.day <= ? GROUP BY ii.code ORDER BY revenue DESC LIMIT 10").bind(from, to).all();
+        const { results: byStaff } = await env.POS_DB.prepare("SELECT staff, COUNT(*) AS count, SUM(total) AS total FROM invoices WHERE status = 'completed' AND day >= ? AND day <= ? GROUP BY staff ORDER BY total DESC").bind(from, to).all();
+        const debts = await env.POS_DB.prepare("SELECT COALESCE(SUM(CASE WHEN kind = 'charge' THEN amount ELSE -amount END), 0) AS outstanding FROM ledger").first();
+        const { results: topDebtors } = await env.POS_DB.prepare("SELECT c.id, c.name, c.phone, SUM(CASE WHEN l.kind = 'charge' THEN l.amount ELSE -l.amount END) AS balance FROM customers c JOIN ledger l ON l.customer_id = c.id GROUP BY c.id HAVING balance > 0 ORDER BY balance DESC LIMIT 10").all();
+        const collected = await env.POS_DB.prepare("SELECT COALESCE(SUM(amount), 0) AS c FROM ledger WHERE kind = 'payment' AND day >= ? AND day <= ?").bind(from, to).first();
+        return json({ from, to, summary: sum, top: top || [], byStaff: byStaff || [], debtsOutstanding: debts?.outstanding ?? 0, topDebtors: topDebtors || [], collectedInRange: collected?.c ?? 0 });
     }
 
     return json({ error: 'not_found' }, 404);

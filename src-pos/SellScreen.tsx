@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
-import { api, buildWaText, fmt, CartLine, Invoice, Product } from './lib';
+import { api, fmt, CartLine, Customer, Invoice, Product } from './lib';
 
 export default function SellScreen({
     products, onDone, onNeedRefresh, notify,
@@ -12,7 +12,12 @@ export default function SellScreen({
     const [q, setQ] = useState('');
     const [cart, setCart] = useState<CartLine[]>([]);
     const [cartOpen, setCartOpen] = useState(false);
-    const [payment, setPayment] = useState<'cash' | 'vcash'>('cash');
+    const [payment, setPayment] = useState<'cash' | 'vcash' | 'debt'>('cash');
+    const [customers, setCustomers] = useState<Customer[] | null>(null);
+    const [custId, setCustId] = useState(0);
+    const [custQ, setCustQ] = useState('');
+    const [newCustName, setNewCustName] = useState('');
+    const [newCustPhone, setNewCustPhone] = useState('');
     const [invDisc, setInvDisc] = useState('');
     const [custName, setCustName] = useState('');
     const [custPhone, setCustPhone] = useState('');
@@ -43,13 +48,31 @@ export default function SellScreen({
     const total = subtotal - disc;
     const count = cart.reduce((s, l) => s + l.qty, 0);
 
+    const pickDebt = async () => {
+        setPayment('debt');
+        if (customers === null) {
+            try { const r = await api('/api/pos/customers'); setCustomers(r.customers || []); } catch { notify('مشكلة في تحميل العملاء', true); setCustomers([]); }
+        }
+    };
+    const quickAddCustomer = async () => {
+        if (newCustName.trim().length < 2) { notify('اكتب اسم العميل', true); return; }
+        try {
+            const r = await api('/api/pos/customers', 'POST', { name: newCustName.trim(), phone: newCustPhone.trim() });
+            setCustomers((cs) => [...(cs || []), { id: r.id, name: newCustName.trim(), phone: newCustPhone.trim(), notes: '' }]);
+            setCustId(r.id); setNewCustName(''); setNewCustPhone('');
+            notify('اتضاف العميل واتختار ✓');
+        } catch { notify('مشكلة في إضافة العميل', true); }
+    };
+
     const submit = async () => {
         if (!cart.length || busy) return;
+        if (payment === 'debt' && !custId) { notify('اختار العميل اللي هيسجل عليه الآجل', true); return; }
         setBusy(true);
         try {
             const r = await api('/api/pos/invoices', 'POST', {
                 items: cart.map((l) => ({ code: l.code, qty: l.qty, discount: l.discount })),
                 payment, discount: disc, customerName: custName.trim(), customerPhone: custPhone.trim(),
+                customerId: custId || undefined,
             });
             const inv: Invoice = {
                 id: r.id, num: r.num, ts: r.ts, staff: '', payment,
@@ -60,7 +83,7 @@ export default function SellScreen({
                 code: l.code, name: l.name, price: l.price, qty: l.qty,
                 discount: Math.round(l.discount * 100) / 100, line_total: Math.max(0, l.price * l.qty - l.discount),
             }));
-            setCart([]); setCartOpen(false); setInvDisc(''); setCustName(''); setCustPhone('');
+            setCart([]); setCartOpen(false); setInvDisc(''); setCustName(''); setCustPhone(''); setCustId(0); setCustQ('');
             onDone(inv, items);
             onNeedRefresh();
         } catch (e: any) {
@@ -149,16 +172,41 @@ export default function SellScreen({
                                     <div className="pay-toggle">
                                         <button className={payment === 'cash' ? 'on' : ''} onClick={() => setPayment('cash')}>💵 كاش</button>
                                         <button className={payment === 'vcash' ? 'on' : ''} onClick={() => setPayment('vcash')}>📱 فودافون كاش</button>
+                                        <button className={payment === 'debt' ? 'on' : ''} onClick={pickDebt}>🧾 آجل</button>
                                     </div>
+                                    {payment === 'debt' ? (
+                                        <div style={{ marginTop: 10, border: '1.5px dashed var(--amber)', borderRadius: 12, padding: 10 }}>
+                                            <label style={{ fontSize: 13, fontWeight: 700, color: 'var(--navy)' }}>العميل (مطلوب للآجل)</label>
+                                            <input placeholder="ابحث عن عميل…" value={custQ} onChange={(e) => setCustQ(e.target.value)} style={{ width: '100%', border: '1.5px solid var(--line)', borderRadius: 10, padding: '9px 12px', margin: '6px 0' }} />
+                                            <div style={{ maxHeight: 160, overflowY: 'auto' }}>
+                                                {(customers || []).filter((c) => !custQ.trim() || c.name.toLowerCase().includes(custQ.trim().toLowerCase()) || c.phone.includes(custQ.trim())).slice(0, 20).map((c) => (
+                                                    <button key={c.id} onClick={() => setCustId(c.id)} style={{ display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'center', padding: '9px 10px', marginBottom: 4, borderRadius: 10, border: custId === c.id ? '2px solid var(--amber)' : '1.5px solid var(--line)', background: custId === c.id ? '#fff8ea' : '#fff', fontSize: 14 }}>
+                                                        <span><b>{c.name}</b>{c.phone ? ' · ' + c.phone : ''}</span>
+                                                        {(c.balance || 0) > 0 ? <span style={{ fontSize: 12, color: 'var(--danger)', fontWeight: 700 }}>عليه {fmt(c.balance!)}</span> : null}
+                                                    </button>
+                                                ))}
+                                                {customers !== null && (customers || []).length === 0 ? <div style={{ fontSize: 13, color: 'var(--muted)', padding: 6 }}>مفيش عملاء لسه</div> : null}
+                                            </div>
+                                            <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                                                <input placeholder="اسم عميل جديد" value={newCustName} onChange={(e) => setNewCustName(e.target.value)} style={{ flex: 2, border: '1.5px solid var(--line)', borderRadius: 10, padding: '8px 10px', fontSize: 14 }} />
+                                                <input placeholder="تليفون" inputMode="tel" dir="ltr" value={newCustPhone} onChange={(e) => setNewCustPhone(e.target.value)} style={{ flex: 1.4, border: '1.5px solid var(--line)', borderRadius: 10, padding: '8px 10px', fontSize: 14, textAlign: 'end' }} />
+                                                <button className="btn btn-navy btn-sm" onClick={quickAddCustomer}>إضافة</button>
+                                            </div>
+                                        </div>
+                                    ) : null}
                                 </div>
-                                <div className="field">
-                                    <label>اسم العميل (اختياري)</label>
-                                    <input value={custName} onChange={(e) => setCustName(e.target.value)} placeholder="اسم العميل" />
-                                </div>
-                                <div className="field">
-                                    <label>رقم واتساب العميل (اختياري — لإرسال الفاتورة)</label>
-                                    <input inputMode="tel" dir="ltr" style={{ textAlign: 'end' }} value={custPhone} onChange={(e) => setCustPhone(e.target.value)} placeholder="01xxxxxxxxx" />
-                                </div>
+                                {payment !== 'debt' ? (
+                                    <>
+                                        <div className="field">
+                                            <label>اسم العميل (اختياري)</label>
+                                            <input value={custName} onChange={(e) => setCustName(e.target.value)} placeholder="اسم العميل" />
+                                        </div>
+                                        <div className="field">
+                                            <label>رقم واتساب العميل (اختياري — لإرسال الفاتورة)</label>
+                                            <input inputMode="tel" dir="ltr" style={{ textAlign: 'end' }} value={custPhone} onChange={(e) => setCustPhone(e.target.value)} placeholder="01xxxxxxxxx" />
+                                        </div>
+                                    </>
+                                ) : null}
                             </div>
                         </div>
                         <div style={{ padding: '12px 18px calc(14px + env(safe-area-inset-bottom))', borderTop: '1px solid var(--line)' }}>

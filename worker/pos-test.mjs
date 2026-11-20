@@ -1,8 +1,10 @@
 import worker from './worker.js';
 
 // ---- In-memory D1 stub: يفهم الـ SQL المحدود اللي الـ worker بيستخدمه للـ POS ----
-const tables = { stock: new Map(), invoices: new Map(), items: [] };
+const tables = { stock: new Map(), invoices: new Map(), items: [], customers: new Map(), ledger: [] };
 let nextId = 1;
+let nextCustId = 1;
+let nextLedgerId = 1;
 
 function stmt(sql) {
     let args = [];
@@ -43,8 +45,8 @@ function exec(sql, args, mode) {
         return { meta: { changes: 1, last_row_id: id } };
     }
     if (sql.startsWith('UPDATE invoices SET num = ?')) {
-        const [num, ts, day, staff, payment, subtotal, discount, total, cn, cp, id] = args;
-        Object.assign(tables.invoices.get(id), { num, ts, day, staff, payment, subtotal, discount, total, status: 'completed', customer_name: cn, customer_phone: cp });
+        const [num, ts, day, staff, payment, subtotal, discount, total, cn, cp, cid, id] = args;
+        Object.assign(tables.invoices.get(id), { num, ts, day, staff, payment, subtotal, discount, total, status: 'completed', customer_name: cn, customer_phone: cp, customer_id: cid });
         return { meta: { changes: 1 } };
     }
     if (sql.startsWith('INSERT INTO invoice_items')) {
@@ -89,6 +91,91 @@ function exec(sql, args, mode) {
             byStaff.set(i.staff, g);
         }
         return { results: [...byStaff.values()] };
+    }
+    // customers
+    if (sql.startsWith('SELECT id FROM customers WHERE id = ?') || sql.startsWith('SELECT id, name, phone FROM customers WHERE id = ?') || sql.startsWith('SELECT id, name, phone, notes FROM customers WHERE id = ?')) {
+        return tables.customers.get(args[0]) || null;
+    }
+    if (sql.startsWith('SELECT c.id, c.name, c.phone, c.notes')) {
+        const rows = [...tables.customers.values()].map((c) => ({ ...c, balance: tables.ledger.filter((l) => l.customer_id === c.id).reduce((s, l) => s + (l.kind === 'charge' ? l.amount : -l.amount), 0) }));
+        return { results: rows };
+    }
+    if (sql.startsWith('INSERT INTO customers')) {
+        const [name, phone, notes, created_at] = args;
+        const id = nextCustId++;
+        tables.customers.set(id, { id, name, phone, notes, created_at });
+        return { meta: { changes: 1, last_row_id: id } };
+    }
+    if (sql.startsWith('UPDATE customers SET')) {
+        const [name, phone, notes, id] = args;
+        Object.assign(tables.customers.get(id), { name, phone, notes });
+        return { meta: { changes: 1 } };
+    }
+    if (sql.startsWith('SELECT COUNT(*) AS n FROM ledger WHERE customer_id = ?')) {
+        return { n: tables.ledger.filter((l) => l.customer_id === args[0]).length };
+    }
+    if (sql.startsWith('DELETE FROM customers')) {
+        tables.customers.delete(args[0]);
+        return { meta: { changes: 1 } };
+    }
+    // ledger
+    if (sql.startsWith('INSERT INTO ledger')) {
+        const kind = sql.includes("'charge'") ? 'charge' : 'payment';
+        // charge: (customer_id, ts, day, amount, invoice_id, staff) — payment: (customer_id, ts, day, amount, staff, note)
+        const [customer_id, ts, day, amount, a4, a5] = args;
+        tables.ledger.push({ id: nextLedgerId++, customer_id, ts, day, kind, amount, invoice_id: kind === 'charge' ? a4 : null, staff: kind === 'charge' ? a5 : a4, note: kind === 'payment' ? a5 : '' });
+        return { meta: { changes: 1 } };
+    }
+    if (sql.startsWith("DELETE FROM ledger WHERE id = ? AND kind = 'payment'")) {
+        const i = tables.ledger.findIndex((l) => l.id === args[0] && l.kind === 'payment');
+        if (i >= 0) tables.ledger.splice(i, 1);
+        return { meta: { changes: 1 } };
+    }
+    if (sql.startsWith("DELETE FROM ledger WHERE invoice_id = ? AND kind = 'charge'")) {
+        for (let i = tables.ledger.length - 1; i >= 0; i--) if (tables.ledger[i].invoice_id === args[0] && tables.ledger[i].kind === 'charge') tables.ledger.splice(i, 1);
+        return { meta: { changes: 1 } };
+    }
+    if (sql.startsWith('SELECT id, ts, kind, amount, invoice_id, staff, note FROM ledger WHERE customer_id = ?')) {
+        return { results: tables.ledger.filter((l) => l.customer_id === args[0]).sort((a, b) => b.id - a.id) };
+    }
+    if (sql.startsWith('SELECT COALESCE(SUM(CASE') && sql.includes('FROM ledger WHERE customer_id = ?')) {
+        const b = tables.ledger.filter((l) => l.customer_id === args[0]).reduce((s, l) => s + (l.kind === 'charge' ? l.amount : -l.amount), 0);
+        return { b };
+    }
+    if (sql.startsWith('SELECT id, num, ts, staff, payment, total, status FROM invoices WHERE customer_id = ?')) {
+        return { results: [...tables.invoices.values()].filter((i) => i.customer_id === args[0] && i.status !== 'pending') };
+    }
+    // reports
+    if (sql.startsWith('SELECT COUNT(*) AS count, COALESCE(SUM(total), 0) AS total')) {
+        const rows = [...tables.invoices.values()].filter((i) => i.status === 'completed' && i.day >= args[0] && i.day <= args[1]);
+        return { count: rows.length, total: rows.reduce((s, i) => s + i.total, 0), cash_total: rows.filter((i) => i.payment === 'cash').reduce((s, i) => s + i.total, 0), vcash_total: rows.filter((i) => i.payment === 'vcash').reduce((s, i) => s + i.total, 0), debt_total: rows.filter((i) => i.payment === 'debt').reduce((s, i) => s + i.total, 0), discounts: rows.reduce((s, i) => s + i.discount, 0) };
+    }
+    if (sql.startsWith('SELECT ii.name, ii.code')) {
+        const ids = new Set([...tables.invoices.values()].filter((i) => i.status === 'completed' && i.day >= args[0] && i.day <= args[1]).map((i) => i.id));
+        const byCode = new Map();
+        for (const it of tables.items.filter((x) => ids.has(x.invoice_id))) {
+            const g = byCode.get(it.code) || { name: it.name, code: it.code, qty: 0, revenue: 0 };
+            g.qty += it.qty; g.revenue += it.line_total;
+            byCode.set(it.code, g);
+        }
+        return { results: [...byCode.values()].sort((a, b) => b.revenue - a.revenue) };
+    }
+    if (sql.startsWith('SELECT staff, COUNT(*) AS count, SUM(total) AS total FROM invoices')) {
+        const rows = [...tables.invoices.values()].filter((i) => i.status === 'completed' && i.day >= args[0] && i.day <= args[1]);
+        const byStaff = new Map();
+        for (const i of rows) { const g = byStaff.get(i.staff) || { staff: i.staff, count: 0, total: 0 }; g.count++; g.total += i.total; byStaff.set(i.staff, g); }
+        return { results: [...byStaff.values()] };
+    }
+    if (sql.startsWith('SELECT COALESCE(SUM(CASE') && sql.includes('FROM ledger') && !sql.includes('customer_id')) {
+        return { outstanding: tables.ledger.reduce((s, l) => s + (l.kind === 'charge' ? l.amount : -l.amount), 0) };
+    }
+    if (sql.startsWith('SELECT c.id, c.name, c.phone, SUM(CASE')) {
+        const byCust = new Map();
+        for (const l of tables.ledger) { const c = tables.customers.get(l.customer_id); if (!c) continue; const g = byCust.get(l.customer_id) || { id: c.id, name: c.name, phone: c.phone, balance: 0 }; g.balance += l.kind === 'charge' ? l.amount : -l.amount; byCust.set(l.customer_id, g); }
+        return { results: [...byCust.values()].filter((g) => g.balance > 0).sort((a, b) => b.balance - a.balance) };
+    }
+    if (sql.startsWith("SELECT COALESCE(SUM(amount), 0) AS c FROM ledger WHERE kind = 'payment' AND day >= ? AND day <= ?")) {
+        return { c: tables.ledger.filter((l) => l.kind === 'payment' && l.day >= args[0] && l.day <= args[1]).reduce((s, l) => s + l.amount, 0) };
     }
     throw new Error('stub does not understand SQL: ' + sql);
 }
@@ -184,6 +271,79 @@ r = await call('GET', '/api/pos/close?date=' + today, null, MGR);
 check('close shows manager row, voided excluded', r.status === 200 && r.body.rows.length === 1 && r.body.rows[0].total === 180 && r.body.rows[0].count === 1);
 r = await call('GET', '/api/pos/close?date=' + today, null, CSH);
 check('cashier close empty', r.status === 200 && r.body.rows.length === 0);
+
+
+// ===== المرحلة 2: عملاء ومديونيات وتقارير =====
+r = await call('POST', '/api/pos/customers', { name: 'أسطى محمود', phone: '01011111111' }, CSH);
+check('cashier adds customer', r.status === 200 && r.body.id > 0);
+const custId = r.body.id;
+r = await call('POST', '/api/pos/customers', { name: 'x' }, CSH);
+check('short name rejected', r.status === 400);
+
+r = await call('GET', '/api/pos/customers', null, CSH);
+check('customers list with zero balance', r.status === 200 && r.body.customers.length === 1 && r.body.customers[0].balance === 0);
+
+// بيع آجل من غير عميل ممنوع
+r = await call('POST', '/api/pos/invoices', { items: [{ code: 'EL-101', qty: 2 }], payment: 'debt' }, CSH);
+check('debt without customer rejected', r.status === 400 && r.body.error === 'customer_required');
+
+// بيع آجل بعميل
+r = await call('POST', '/api/pos/invoices', { items: [{ code: 'EL-101', qty: 2 }], payment: 'debt', customerId: custId }, CSH);
+check('debt sale ok', r.status === 200 && r.body.ok);
+const debtInvId = r.body.id;
+
+r = await call('GET', '/api/pos/customer/' + custId, null, CSH);
+check('balance = debt total', r.status === 200 && r.body.balance === 180);
+check('ledger has charge linked to invoice', r.body.ledger.length === 1 && r.body.ledger[0].invoice_id === debtInvId && r.body.ledger[0].kind === 'charge');
+check('customer invoices listed', r.body.invoices.length === 1 && r.body.invoices[0].payment === 'debt');
+
+// دفعة جزئية
+r = await call('POST', '/api/pos/customer/' + custId + '/payment', { amount: 100, method: 'cash' }, CSH);
+check('payment ok, balance reduced', r.status === 200 && r.body.balance === 80);
+r = await call('POST', '/api/pos/customer/' + custId + '/payment', { amount: -5 }, CSH);
+check('negative payment rejected', r.status === 400);
+r = await call('POST', '/api/pos/customer/9999/payment', { amount: 10 }, CSH);
+check('payment for unknown customer rejected', r.status === 404);
+
+// مسح قيد دفعة: كاشير ممنوع، مدير مسموح
+const payEntry = (await call('GET', '/api/pos/customer/' + custId, null, MGR)).body.ledger.find((l) => l.kind === 'payment');
+r = await call('DELETE', '/api/pos/ledger/' + payEntry.id, null, CSH);
+check('cashier cannot delete ledger entry', r.status === 403);
+r = await call('DELETE', '/api/pos/ledger/' + payEntry.id, null, MGR);
+check('manager deletes payment entry', r.status === 200);
+r = await call('GET', '/api/pos/customer/' + custId, null, MGR);
+check('balance back to 180', r.body.balance === 180);
+
+// تعديل عميل: كاشير ممنوع
+r = await call('PATCH', '/api/pos/customers?id=' + custId, { name: 'أسطى محمود عبد الرحمن', phone: '01011111111' }, CSH);
+check('cashier cannot edit customer', r.status === 403);
+r = await call('PATCH', '/api/pos/customers?id=' + custId, { name: 'أسطى محمود عبد الرحمن', phone: '01011111111' }, MGR);
+check('manager edits customer', r.status === 200);
+
+// مسح عميل عليه قيود ممنوع
+r = await call('DELETE', '/api/pos/customers?id=' + custId, null, MGR);
+check('customer with ledger cannot be deleted', r.status === 400 && r.body.error === 'has_ledger');
+
+// إلغاء فاتورة الآجل بيشيل قيد الدين
+r = await call('POST', '/api/pos/invoice/' + debtInvId + '/void', null, MGR);
+check('void debt invoice', r.status === 200);
+r = await call('GET', '/api/pos/customer/' + custId, null, MGR);
+check('void removes debt charge', r.body.balance === 0 && r.body.ledger.length === 0);
+
+// التقارير
+const today2 = new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+r = await call('GET', `/api/pos/reports?from=${today2}&to=${today2}`, null, CSH);
+check('cashier cannot see reports', r.status === 403);
+r = await call('GET', `/api/pos/reports?from=${today2}&to=${today2}`, null, MGR);
+check('report summary excludes voided', r.status === 200 && r.body.summary.count === 1 && r.body.summary.cash_total === 180 && r.body.summary.debt_total === 0);
+check('report top products', r.body.top.length === 1 && r.body.top[0].code === 'EL-101' && r.body.top[0].qty === 2);
+check('report by staff', r.body.byStaff.length === 1 && r.body.byStaff[0].total === 180);
+check('report debts zero after void', r.body.debtsOutstanding === 0);
+
+// دين جديد يظهر في التقارير
+await call('POST', '/api/pos/invoices', { items: [{ code: 'EL-101', qty: 1 }], payment: 'debt', customerId: custId }, CSH);
+r = await call('GET', `/api/pos/reports?from=${today2}&to=${today2}`, null, MGR);
+check('report shows debt total + outstanding', r.body.summary.debt_total === 90 && r.body.debtsOutstanding === 90 && r.body.topDebtors.length === 1 && r.body.topDebtors[0].balance === 90);
 
 console.log(failed === 0 ? 'ALL PASS' : failed + ' FAILED');
 process.exit(failed === 0 ? 0 : 1);

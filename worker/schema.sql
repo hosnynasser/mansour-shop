@@ -29,3 +29,23 @@ CREATE TABLE IF NOT EXISTS invoice_items (
 CREATE INDEX IF NOT EXISTS idx_items_invoice ON invoice_items(invoice_id);
 CREATE INDEX IF NOT EXISTS idx_invoices_ts ON invoices(ts);
 CREATE INDEX IF NOT EXISTS idx_invoices_day ON invoices(day);
+CREATE TABLE IF NOT EXISTS customers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    phone TEXT DEFAULT '',
+    notes TEXT DEFAULT '',
+    created_at TEXT
+);
+CREATE TABLE IF NOT EXISTS ledger (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    customer_id INTEGER NOT NULL,
+    ts TEXT,
+    day TEXT,
+    kind TEXT NOT NULL,
+    amount REAL NOT NULL,
+    invoice_id INTEGER,
+    staff TEXT,
+    note TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_ledger_customer ON ledger(customer_id);
+CREATE INDEX IF NOT EXISTS idx_ledger_day ON ledger(day);

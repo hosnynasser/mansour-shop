@@ -2,11 +2,12 @@ import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { api, buildWaText, clearCred, cred, fmt, fmtTime, paymentLabel, saveCred, Invoice, InvoiceItem, Product, Staff } from './lib';
 import SellScreen from './SellScreen';
-import { CloseScreen, InvoicesScreen, StaffScreen, StockScreen } from './screens';
+import { CloseScreen, CustomersScreen, InvoicesScreen, ReportsScreen, StaffScreen, StockScreen } from './screens';
 import PrintDoc from './PrintDoc';
+import SharePdf from './SharePdf';
 import logo from '../src/photos/logo-mansour.png';
 
-type Tab = 'sell' | 'invoices' | 'stock' | 'close' | 'staff';
+type Tab = 'sell' | 'invoices' | 'customers' | 'stock' | 'close' | 'reports' | 'staff';
 
 export default function App() {
     const [staff, setStaff] = useState<Staff | null>(null);
@@ -111,8 +112,9 @@ export default function App() {
     const tabs: { id: Tab; label: string; icon: string; managerOnly?: boolean }[] = [
         { id: 'sell', label: 'بيع', icon: '🛒' },
         { id: 'invoices', label: 'فواتير', icon: '🧾' },
+        { id: 'customers', label: 'العملاء', icon: '🤝' },
         { id: 'stock', label: 'المخزون', icon: '📦' },
-        { id: 'close', label: 'التقفيلة', icon: '📊' },
+        manager ? { id: 'reports', label: 'التقارير', icon: '📊' } : { id: 'close', label: 'التقفيلة', icon: '📊' },
         { id: 'staff', label: 'الموظفين', icon: '👥', managerOnly: true },
     ];
     const activeDetail = done || detail;
@@ -135,8 +137,10 @@ export default function App() {
             <div className="pos-main">
                 {tab === 'sell' ? <SellScreen products={products} onDone={(inv, items) => { setDone({ inv, items }); }} onNeedRefresh={refreshProducts} notify={notify} /> : null}
                 {tab === 'invoices' ? <InvoicesScreen staff={staff} openInvoice={openInvoice} notify={notify} /> : null}
+                {tab === 'customers' ? <CustomersScreen staff={staff} openInvoice={openInvoice} notify={notify} /> : null}
                 {tab === 'stock' ? <StockScreen staff={staff} products={products} refresh={refreshProducts} notify={notify} /> : null}
                 {tab === 'close' ? <CloseScreen staff={staff} notify={notify} /> : null}
+                {tab === 'reports' && manager ? <ReportsScreen notify={notify} /> : null}
                 {tab === 'staff' && manager ? <StaffScreen me={staff} notify={notify} /> : null}
             </div>
 
@@ -164,6 +168,7 @@ export default function App() {
                                 <button className="btn btn-blue btn-block" onClick={() => setPrintJob({ ...done, mode: 'r80' })}>🖨️ طباعة إيصال (80مم)</button>
                                 <button className="btn btn-ghost btn-block" onClick={() => setPrintJob({ ...done, mode: 'a4' })}>📄 طباعة / PDF (A4)</button>
                                 <button className="btn btn-wa btn-block" onClick={() => waShare(done.inv, done.items)}>إرسال واتساب</button>
+                                <SharePdf inv={done.inv} items={done.items} logo={logo} notify={notify} />
                                 <button className="btn btn-ghost btn-block" onClick={() => sysShare(done.inv, done.items)}>📤 مشاركة</button>
                                 {manager ? <button className="btn btn-danger btn-block" onClick={() => voidInvoice(done.inv.id)}>إلغاء الفاتورة</button> : null}
                                 <button className="btn btn-amber btn-block" onClick={() => setDone(null)}>🛒 بيع جديد</button>
@@ -201,6 +206,7 @@ export default function App() {
                                 <button className="btn btn-blue btn-block" onClick={() => setPrintJob({ ...detail, mode: 'r80' })}>🖨️ طباعة إيصال (80مم)</button>
                                 <button className="btn btn-ghost btn-block" onClick={() => setPrintJob({ ...detail, mode: 'a4' })}>📄 طباعة / PDF (A4)</button>
                                 <button className="btn btn-wa btn-block" onClick={() => waShare(detail.inv, detail.items)}>إرسال واتساب</button>
+                                <SharePdf inv={detail.inv} items={detail.items} logo={logo} notify={notify} />
                                 <button className="btn btn-ghost btn-block" onClick={() => sysShare(detail.inv, detail.items)}>📤 مشاركة</button>
                                 {manager && detail.inv.status !== 'voided' ? <button className="btn btn-danger btn-block" onClick={() => voidInvoice(detail.inv.id)}>إلغاء الفاتورة</button> : null}
                             </div>

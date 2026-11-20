@@ -13,6 +13,17 @@ export interface Invoice {
     customer_name: string; customer_phone: string;
 }
 export interface InvoiceItem { code: string; name: string; price: number; qty: number; discount: number; line_total: number; }
+export interface Customer { id: number; name: string; phone: string; notes: string; balance?: number; }
+export interface LedgerEntry { id: number; ts: string; kind: 'charge' | 'payment'; amount: number; invoice_id: number | null; staff: string; note: string; }
+export interface Report {
+    from: string; to: string;
+    summary: { count: number; total: number; cash_total: number; vcash_total: number; debt_total: number; discounts: number };
+    top: { name: string; code: string; qty: number; revenue: number }[];
+    byStaff: { staff: string; count: number; total: number }[];
+    debtsOutstanding: number;
+    topDebtors: { id: number; name: string; phone: string; balance: number }[];
+    collectedInRange: number;
+}
 
 export function cred(): string {
     try { return localStorage.getItem('pos_cred') || ''; } catch { return ''; }
@@ -49,7 +60,7 @@ export function fmtTime(ts: string): string {
     } catch { return ts; }
 }
 
-export const paymentLabel = (p: string) => (p === 'vcash' ? 'فودافون كاش' : 'كاش');
+export const paymentLabel = (p: string) => (p === 'vcash' ? 'فودافون كاش' : p === 'debt' ? 'آجل' : 'كاش');
 
 export function buildWaText(inv: Invoice, items: InvoiceItem[]): string {
     const L: string[] = [];
@@ -66,6 +77,7 @@ export function buildWaText(inv: Invoice, items: InvoiceItem[]): string {
     if (inv.discount > 0) L.push('الخصم: ' + fmt(inv.discount) + ' ج');
     L.push('✅ الإجمالي: ' + fmt(inv.total) + ' ج');
     L.push('طريقة الدفع: ' + paymentLabel(inv.payment));
+    if (inv.payment === 'debt') L.push('⚠️ الحساب ده اتسجل آجل على العميل');
     L.push('شكراً لتعاملكم معنا 🌟');
     L.push('📞 ' + SHOP_PHONE);
     return L.join('\n');
