@@ -163,7 +163,8 @@ export default function App() {
         { id: 'customers', label: 'العملاء', icon: '🤝' },
         { id: 'stock', label: 'المخزون', icon: '📦' },
         { id: 'purchases', label: 'المشتريات', icon: '🚚', managerOnly: true },
-        manager ? { id: 'reports', label: 'التقارير', icon: '📊' } : { id: 'close', label: 'التقفيلة', icon: '📊' },
+        { id: 'close', label: 'التقفيلة', icon: '🧮' },
+        { id: 'reports', label: 'التقارير', icon: '📊', managerOnly: true },
         { id: 'staff', label: 'الموظفين', icon: '👥', managerOnly: true },
     ];
     const activeDetail = done || detail;
