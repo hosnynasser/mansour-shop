@@ -5,18 +5,18 @@ export default function CatChips({ categories, sel, setSel, extraNone }: { categ
     if (!categories.length) return null;
     const pick = (c: string) => { setSel(c); setOpen(false); };
     const label = sel === '' ? 'الكل' : sel === '__none' ? 'غير مصنف' : sel;
-    if (!open) {
-        return (
-            <div className="cat-chips">
-                <button className={sel === '' ? '' : 'on'} onClick={() => setOpen(true)}>{label} ▾</button>
-            </div>
-        );
-    }
+    const opts: { v: string; t: string }[] = [{ v: '', t: 'الكل' }, ...categories.map((c) => ({ v: c, t: c })), ...(extraNone ? [{ v: '__none', t: 'غير مصنف' }] : [])];
     return (
-        <div className="cat-chips">
-            <button className={sel === '' ? 'on' : ''} onClick={() => pick('')}>الكل ▴</button>
-            {categories.map((c) => <button key={c} className={sel === c ? 'on' : ''} onClick={() => pick(c)}>{c}</button>)}
-            {extraNone ? <button className={sel === '__none' ? 'on' : ''} onClick={() => pick('__none')}>غير مصنف</button> : null}
+        <div className="cat-dd">
+            <button className={'cat-dd-btn' + (sel === '' ? '' : ' on')} onClick={() => setOpen(!open)}>{label} {open ? '▴' : '▾'}</button>
+            {open ? (
+                <>
+                    <div className="cat-dd-back" onClick={() => setOpen(false)} />
+                    <div className="cat-dd-list">
+                        {opts.map((o) => <button key={o.v} className={sel === o.v ? 'on' : ''} onClick={() => pick(o.v)}>{o.t}{sel === o.v ? ' ✓' : ''}</button>)}
+                    </div>
+                </>
+            ) : null}
         </div>
     );
 }
