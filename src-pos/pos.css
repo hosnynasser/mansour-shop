@@ -202,7 +202,7 @@ body{line-height:1.5;letter-spacing:0}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
 @keyframes sheetUp{from{transform:translateY(100%)}to{transform:none}}
 @keyframes popIn{from{opacity:0;transform:translateY(-6px) scale(.97)}to{opacity:1;transform:none}}
-.screen-in{animation:scrIn .32s var(--ease) both}
+.screen-in{animation:scrIn .32s var(--ease) backwards}
 .sheet-back{animation:fadeIn .2s ease both;backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px)}
 .sheet{animation:sheetUp .32s var(--ease) both;border-radius:26px 26px 0 0}
 .sheet::before{content:"";display:block;width:40px;height:4px;border-radius:4px;background:#d5dce8;margin:8px auto 0;flex:none}
