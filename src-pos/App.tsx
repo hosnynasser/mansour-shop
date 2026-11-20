@@ -45,7 +45,7 @@ export default function App() {
         if (printJob) {
             document.body.classList.add('printing');
             const clear = () => { setPrintJob(null); document.body.classList.remove('printing'); };
-            const t = setTimeout(() => { window.print(); clear(); }, 80);
+            const t = setTimeout(() => { window.print(); setTimeout(clear, 3000); }, 80);
             const onAfter = () => clear();
             window.addEventListener('afterprint', onAfter);
             return () => { clearTimeout(t); window.removeEventListener('afterprint', onAfter); document.body.classList.remove('printing'); };
