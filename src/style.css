@@ -429,3 +429,5 @@ button.footer-admin{font-family:inherit}
 
 /* footer clear of fixed bottom nav on mobile */
 @media(max-width:1000px){.footer{padding-bottom:calc(110px + env(safe-area-inset-bottom))}}
+
+/* auto-deploy check 2026-11-20 */
