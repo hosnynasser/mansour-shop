@@ -66,7 +66,7 @@ const products: Product[] = [
 const PAGE_SIZE = 8;
 
 // ===== الباك إند (Cloudflare Worker) — يتحط رابطه بعد النشر =====
-const API_BASE = '';
+const API_BASE = 'https://mansour-shop-api.hosnynasser843.workers.dev';
 
 async function apiFetch(path: string, opts: RequestInit = {}, adminCode?: string): Promise<any> {
     const r = await fetch(API_BASE + path, {
