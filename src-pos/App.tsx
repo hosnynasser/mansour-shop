@@ -3,11 +3,12 @@ import { createPortal } from 'react-dom';
 import { api, buildWaText, clearCred, cred, fmt, fmtTime, paymentLabel, quoteAsInvoice, saveCred, Customer, Invoice, InvoiceItem, Product, Quote, Staff } from './lib';
 import SellScreen from './SellScreen';
 import { CloseScreen, CustomersScreen, InvoicesScreen, ReportsScreen, StaffScreen, StockScreen } from './screens';
+import PurchasesScreen from './PurchasesScreen';
 import PrintDoc from './PrintDoc';
 import SharePdf from './SharePdf';
 import logo from '../src/photos/logo-mansour.png';
 
-type Tab = 'sell' | 'invoices' | 'customers' | 'stock' | 'close' | 'reports' | 'staff';
+type Tab = 'sell' | 'invoices' | 'customers' | 'stock' | 'purchases' | 'close' | 'reports' | 'staff';
 
 export default function App() {
     const [staff, setStaff] = useState<Staff | null>(null);
@@ -161,6 +162,7 @@ export default function App() {
         { id: 'invoices', label: 'فواتير', icon: '🧾' },
         { id: 'customers', label: 'العملاء', icon: '🤝' },
         { id: 'stock', label: 'المخزون', icon: '📦' },
+        { id: 'purchases', label: 'المشتريات', icon: '🚚', managerOnly: true },
         manager ? { id: 'reports', label: 'التقارير', icon: '📊' } : { id: 'close', label: 'التقفيلة', icon: '📊' },
         { id: 'staff', label: 'الموظفين', icon: '👥', managerOnly: true },
     ];
@@ -186,6 +188,7 @@ export default function App() {
                 {tab === 'invoices' ? <InvoicesScreen staff={staff} openInvoice={openInvoice} openQuote={openQuote} notify={notify} /> : null}
                 {tab === 'customers' ? <CustomersScreen staff={staff} openInvoice={openInvoice} notify={notify} /> : null}
                 {tab === 'stock' ? <StockScreen staff={staff} products={products} refresh={refreshProducts} notify={notify} /> : null}
+                {tab === 'purchases' && manager ? <PurchasesScreen products={products} refresh={refreshProducts} notify={notify} /> : null}
                 {tab === 'close' ? <CloseScreen staff={staff} notify={notify} /> : null}
                 {tab === 'reports' && manager ? <ReportsScreen notify={notify} /> : null}
                 {tab === 'staff' && manager ? <StaffScreen me={staff} notify={notify} /> : null}

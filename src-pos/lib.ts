@@ -62,6 +62,11 @@ export function fmtTime(ts: string): string {
 
 export const paymentLabel = (p: string) => (p === 'vcash' ? 'فودافون كاش' : p === 'debt' ? 'آجل' : p === 'quote' ? 'عرض سعر' : 'كاش');
 
+export interface Supplier { id: number; name: string; phone: string; notes: string; balance: number; }
+export interface Purchase { id: number; num: string; ts: string; staff: string; supplier_id: number; supplier_name: string; total: number; paid: number; status: string; note: string; }
+export interface PurchaseItem { code: string; name: string; qty: number; cost: number; }
+export interface Expense { id: number; ts: string; day: string; title: string; amount: number; cat: string; staff: string; note: string; }
+
 export interface Quote {
     id: number; num: string; ts: string; staff: string;
     customer_name: string; customer_phone: string;

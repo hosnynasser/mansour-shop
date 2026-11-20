@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api, cairoToday, fmt, fmtTime, paymentLabel, Customer, Invoice, LedgerEntry, Product, Quote, Report, Role, Staff } from './lib';
+import { api, cairoToday, fmt, fmtTime, paymentLabel, Customer, Expense, Invoice, LedgerEntry, Product, Quote, Report, Role, Staff } from './lib';
 import ScannerModal from './ScannerModal';
 
 // ---------- فواتير ----------
@@ -80,20 +80,29 @@ export function StockScreen({ staff, products, refresh, notify }: { staff: Staff
     const s = q.trim().toLowerCase();
     const filtered = s ? products.filter((p) => p.name.toLowerCase().includes(s) || p.code.toLowerCase().includes(s)) : products;
 
+    const [minEdit, setMinEdit] = useState<Record<string, string>>({});
     const save = async (code: string) => {
         const v = edit[code];
-        if (v === undefined) return;
+        const mv = minEdit[code];
+        if (v === undefined && mv === undefined) return;
+        const p0 = products.find((p) => p.code === code);
         setBusy(code);
         try {
-            await api('/api/pos/stock', 'POST', { code, qty: parseInt(v, 10) || 0 });
+            await api('/api/pos/stock', 'POST', {
+                code,
+                qty: v !== undefined ? (parseInt(v, 10) || 0) : (p0?.qty ?? 0),
+                minQty: mv !== undefined ? (parseInt(mv, 10) || 0) : undefined,
+            });
             setEdit((e) => { const n = { ...e }; delete n[code]; return n; });
+            setMinEdit((e) => { const n = { ...e }; delete n[code]; return n; });
             refresh();
-            notify('تم حفظ الرصيد ✓');
+            notify('تم الحفظ ✓');
         } catch (e: any) {
             notify(e?.data?.error === 'forbidden' ? 'الصلاحية دي للمدير بس' : 'مشكلة في الحفظ', true);
         }
         setBusy('');
     };
+    const low = products.filter((p) => p.qty <= ((p as any).min_qty ?? 5));
 
     return (
         <>
@@ -104,6 +113,11 @@ export function StockScreen({ staff, products, refresh, notify }: { staff: Staff
                 </div>
             </div>
             {!manager ? <div className="err-box" style={{ background: '#fff8ea', color: 'var(--amber-d)' }}>عرض فقط — تعديل الأرصدة للمدير</div> : null}
+            {low.length > 0 ? (
+                <div className="err-box" style={{ background: '#fdecec', color: 'var(--danger)', marginBottom: 10 }}>
+                    ⚠️ نواقص المخزون ({low.length}): {low.map((p) => p.name + ' (' + p.qty + ')').join('، ')}
+                </div>
+            ) : null}
             {filtered.map((p) => (
                 <div className="stock-row" key={p.code}>
                     <div className="sn">{p.name}<span>{p.code}{(p as any).barcode ? ' · 🏷️ ' + (p as any).barcode : ''}</span></div>
@@ -112,10 +126,18 @@ export function StockScreen({ staff, products, refresh, notify }: { staff: Staff
                             <button className="btn btn-ghost btn-sm" onClick={() => setScanFor(p.code)} title="ربط باركود">📷</button>
                             <input
                                 inputMode="numeric"
+                                title="الرصيد"
                                 value={edit[p.code] !== undefined ? edit[p.code] : String(p.qty)}
                                 onChange={(e) => setEdit((x) => ({ ...x, [p.code]: e.target.value }))}
                             />
-                            {edit[p.code] !== undefined && edit[p.code] !== String(p.qty) ? (
+                            <input
+                                inputMode="numeric"
+                                title="حد النواقص — نبهني لو الرصيد وصل له"
+                                style={{ width: 44, borderColor: p.qty <= ((p as any).min_qty ?? 5) ? 'var(--danger)' : undefined }}
+                                value={minEdit[p.code] !== undefined ? minEdit[p.code] : String((p as any).min_qty ?? 5)}
+                                onChange={(e) => setMinEdit((x) => ({ ...x, [p.code]: e.target.value }))}
+                            />
+                            {((edit[p.code] !== undefined && edit[p.code] !== String(p.qty)) || (minEdit[p.code] !== undefined && minEdit[p.code] !== String((p as any).min_qty ?? 5))) ? (
                                 <button className="btn btn-blue btn-sm" disabled={busy === p.code} onClick={() => save(p.code)}>{busy === p.code ? '…' : 'حفظ'}</button>
                             ) : null}
                         </>
@@ -134,16 +156,41 @@ export function CloseScreen({ staff, notify }: { staff: Staff; notify: (m: strin
     const [date, setDate] = useState(cairoToday());
     const [rows, setRows] = useState<{ staff: string; count: number; total: number; cash_total: number; vcash_total: number }[]>([]);
     const [loading, setLoading] = useState(true);
+    const [expenses, setExpenses] = useState<Expense[]>([]);
+    const [exTitle, setExTitle] = useState('');
+    const [exAmount, setExAmount] = useState('');
+    const [exBusy, setExBusy] = useState(false);
+    const manager = staff.role === 'manager';
 
     const load = async () => {
         setLoading(true);
         try {
             const r = await api('/api/pos/close?date=' + date);
             setRows(r.rows || []);
+            const ex = await api('/api/pos/expenses?date=' + date + (manager ? '&all=1' : ''));
+            setExpenses(ex.expenses || []);
         } catch { notify('مشكلة في تحميل التقفيلة', true); }
         setLoading(false);
     };
     useEffect(() => { load(); }, [date]);
+
+    const addExpense = async () => {
+        const a = Number(exAmount) || 0;
+        if (exTitle.trim().length < 2 || a <= 0 || exBusy) { notify('اكتب بيان المصروف ومبلغه', true); return; }
+        setExBusy(true);
+        try {
+            await api('/api/pos/expenses', 'POST', { title: exTitle.trim(), amount: a });
+            setExTitle(''); setExAmount('');
+            notify('اتسجل المصروف ✓');
+            load();
+        } catch { notify('مشكلة في تسجيل المصروف', true); }
+        setExBusy(false);
+    };
+    const delExpense = async (id: number) => {
+        try { await api('/api/pos/expense/' + id, 'DELETE'); setExpenses((xs) => xs.filter((x) => x.id !== id)); notify('اتمسح ✓'); }
+        catch { notify('مشكلة في المسح', true); }
+    };
+    const exTotal = expenses.reduce((s, e) => s + e.amount, 0);
 
     const grand = rows.reduce((a, r) => ({ count: a.count + r.count, total: a.total + r.total, cash: a.cash + r.cash_total, vcash: a.vcash + r.vcash_total }), { count: 0, total: 0, cash: 0, vcash: 0 });
 
@@ -152,6 +199,25 @@ export function CloseScreen({ staff, notify }: { staff: Staff; notify: (m: strin
             <div className="field">
                 <label>اليوم</label>
                 <input type="date" value={date} onChange={(e) => setDate(e.target.value)} dir="ltr" style={{ textAlign: 'end' }} />
+            </div>
+            <div className="close-card" style={{ marginBottom: 12 }}>
+                <h4>💸 مصاريف اليوم</h4>
+                <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+                    <input placeholder="بيان المصروف" value={exTitle} onChange={(e) => setExTitle(e.target.value)} style={{ flex: 1.6, border: '1.5px solid var(--line)', borderRadius: 10, padding: '9px 10px' }} />
+                    <input inputMode="decimal" placeholder="المبلغ" value={exAmount} onChange={(e) => setExAmount(e.target.value)} style={{ flex: 1, border: '1.5px solid var(--line)', borderRadius: 10, padding: '9px 10px' }} />
+                    <button className="btn btn-navy btn-sm" disabled={exBusy} onClick={addExpense}>{exBusy ? '…' : 'تسجيل'}</button>
+                </div>
+                {expenses.length === 0 ? <div style={{ fontSize: 13, color: 'var(--muted)' }}>مفيش مصاريف مسجلة في اليوم ده</div> : (
+                    <>
+                        {expenses.map((e) => (
+                            <div className="close-line" key={e.id}>
+                                <span>{e.title}{manager ? ' · ' + e.staff : ''}</span>
+                                <b>{fmt(e.amount)} ج <button className="btn btn-ghost btn-sm" style={{ padding: '2px 6px' }} onClick={() => delExpense(e.id)}>✕</button></b>
+                            </div>
+                        ))}
+                        <div className="close-line" style={{ borderTop: '1px dashed var(--line)', paddingTop: 6 }}><span>إجمالي المصاريف</span><b style={{ color: 'var(--danger)' }}>{fmt(exTotal)} ج</b></div>
+                    </>
+                )}
             </div>
             {loading ? <div className="empty">جاري التحميل…</div> : rows.length === 0 ? <div className="empty">مفيش مبيعات في اليوم ده</div> : (
                 <>

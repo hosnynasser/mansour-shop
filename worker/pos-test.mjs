@@ -1,11 +1,14 @@
 import worker from './worker.js';
 
 // ---- In-memory D1 stub: يفهم الـ SQL المحدود اللي الـ worker بيستخدمه للـ POS ----
-const tables = { stock: new Map(), invoices: new Map(), items: [], customers: new Map(), ledger: [], barcodes: new Map(), quotes: new Map(), qitems: [] };
+const tables = { stock: new Map(), invoices: new Map(), items: [], customers: new Map(), ledger: [], barcodes: new Map(), quotes: new Map(), qitems: [], costs: new Map(), minqtys: new Map(), suppliers: new Map(), purchases: new Map(), pitems: [], expenses: new Map() };
 let nextId = 1;
 let nextCustId = 1;
 let nextLedgerId = 1;
 let nextQuoteId = 1;
+let nextSupId = 1;
+let nextPurId = 1;
+let nextExpId = 1;
 
 function stmt(sql) {
     let args = [];
@@ -20,9 +23,29 @@ function stmt(sql) {
 }
 function exec(sql, args, mode) {
     // stock
-    if (sql === 'SELECT code, qty FROM stock' || sql === 'SELECT code, qty, barcode FROM stock') {
-        const rows = [...tables.stock.entries()].map(([code, qty]) => ({ code, qty, barcode: tables.barcodes.get(code) || '' }));
+    if (sql.startsWith('SELECT code, qty FROM stock') || sql.startsWith('SELECT code, qty, barcode FROM stock') || sql.startsWith('SELECT code, qty, barcode, cost, min_qty FROM stock')) {
+        const rows = [...tables.stock.entries()].map(([code, qty]) => ({ code, qty, barcode: tables.barcodes.get(code) || '', cost: tables.costs.get(code) || 0, min_qty: tables.minqtys.get(code) ?? 5 }));
         return { results: rows };
+    }
+    if (sql.startsWith('INSERT INTO stock') && sql.includes('min_qty')) {
+        const [code, qty, minQty] = args;
+        tables.stock.set(code, qty);
+        tables.minqtys.set(code, minQty);
+        return { meta: { changes: 1 } };
+    }
+    if (sql.startsWith('INSERT INTO stock') && sql.includes('cost')) {
+        const [code, qty, cost] = args;
+        if (sql.includes('qty = qty + excluded.qty')) tables.stock.set(code, (tables.stock.get(code) || 0) + qty);
+        else tables.stock.set(code, qty);
+        tables.costs.set(code, cost);
+        return { meta: { changes: 1 } };
+    }
+    if (sql === 'SELECT qty FROM stock WHERE code = ?') {
+        return tables.stock.has(args[0]) ? { qty: tables.stock.get(args[0]) } : null;
+    }
+    if (sql === 'UPDATE stock SET qty = qty - ? WHERE code = ?') {
+        tables.stock.set(args[1], tables.stock.get(args[1]) - args[0]);
+        return { meta: { changes: 1 } };
     }
     if (sql === 'SELECT code FROM stock') {
         return { results: [...tables.stock.keys()].map((code) => ({ code })) };
@@ -186,6 +209,83 @@ function exec(sql, args, mode) {
     }
     if (sql.startsWith("SELECT COALESCE(SUM(amount), 0) AS c FROM ledger WHERE kind = 'payment' AND day >= ? AND day <= ?")) {
         return { c: tables.ledger.filter((l) => l.kind === 'payment' && l.day >= args[0] && l.day <= args[1]).reduce((s, l) => s + l.amount, 0) };
+    }
+    // suppliers
+    if (sql.startsWith('INSERT INTO suppliers')) {
+        const id = nextSupId++;
+        tables.suppliers.set(id, { id, name: args[0], phone: args[1], notes: args[2], balance: 0 });
+        return { meta: { changes: 1, last_row_id: id } };
+    }
+    if (sql.startsWith('SELECT id, name, phone, notes, balance FROM suppliers')) {
+        return { results: [...tables.suppliers.values()] };
+    }
+    if (sql.startsWith('SELECT * FROM suppliers WHERE id = ?') || sql.startsWith('SELECT id, name FROM suppliers WHERE id = ?') || sql.startsWith('SELECT id, balance FROM suppliers WHERE id = ?') || sql.startsWith('SELECT balance FROM suppliers WHERE id = ?')) {
+        return tables.suppliers.get(args[0]) || null;
+    }
+    if (sql.startsWith('UPDATE suppliers SET name = ?')) {
+        Object.assign(tables.suppliers.get(args[3]), { name: args[0], phone: args[1], notes: args[2] });
+        return { meta: { changes: 1 } };
+    }
+    if (sql.startsWith('UPDATE suppliers SET balance = balance + ?')) {
+        tables.suppliers.get(args[1]).balance += args[0];
+        return { meta: { changes: 1 } };
+    }
+    if (sql.startsWith('UPDATE suppliers SET balance = balance - ?')) {
+        tables.suppliers.get(args[1]).balance -= args[0];
+        return { meta: { changes: 1 } };
+    }
+    if (sql.startsWith('DELETE FROM suppliers')) {
+        tables.suppliers.delete(args[0]);
+        return { meta: { changes: 1 } };
+    }
+    // purchases
+    if (sql.startsWith('INSERT INTO purchases')) {
+        const id = nextPurId++;
+        tables.purchases.set(id, { id, num: '', ts: '', day: '', staff: '', supplier_id: 0, supplier_name: '', total: 0, paid: 0, status: 'completed', note: '' });
+        return { meta: { changes: 1, last_row_id: id } };
+    }
+    if (sql.startsWith('UPDATE purchases SET num = ?')) {
+        const [num, ts, day, staff, sid, sname, total, paid, note, id] = args;
+        Object.assign(tables.purchases.get(id), { num, ts, day, staff, supplier_id: sid, supplier_name: sname, total, paid, note });
+        return { meta: { changes: 1 } };
+    }
+    if (sql.startsWith('INSERT INTO purchase_items')) {
+        const [purchase_id, code, name, qty, cost] = args;
+        tables.pitems.push({ purchase_id, code, name, qty, cost });
+        return { meta: { changes: 1 } };
+    }
+    if (sql.startsWith('SELECT id, num, ts, staff, supplier_id, supplier_name, total, paid, status, note FROM purchases') || sql.startsWith('SELECT id, num, ts, total, paid, status FROM purchases')) {
+        let rows = [...tables.purchases.values()];
+        if (sql.includes('WHERE supplier_id = ?')) rows = rows.filter((p) => p.supplier_id === args[0]);
+        return { results: rows.sort((a, b) => b.id - a.id) };
+    }
+    if (sql.startsWith('SELECT * FROM purchases WHERE id = ?')) {
+        return tables.purchases.get(args[0]) || null;
+    }
+    if (sql.startsWith('SELECT code, name, qty, cost FROM purchase_items') || sql.startsWith('SELECT code, qty FROM purchase_items')) {
+        return { results: tables.pitems.filter((i) => i.purchase_id === args[0]) };
+    }
+    if (sql.startsWith("UPDATE purchases SET status = 'voided'")) {
+        tables.purchases.get(args[0]).status = 'voided';
+        return { meta: { changes: 1 } };
+    }
+    // expenses
+    if (sql.startsWith('INSERT INTO expenses')) {
+        const id = nextExpId++;
+        tables.expenses.set(id, { id, ts: args[0], day: args[1], title: args[2], amount: args[3], cat: args[4], staff: args[5], note: args[6] });
+        return { meta: { changes: 1, last_row_id: id } };
+    }
+    if (sql.startsWith('SELECT id, ts, day, title, amount, cat, staff, note FROM expenses')) {
+        let rows = [...tables.expenses.values()];
+        if (sql.includes('AND staff = ?')) rows = rows.filter((e) => e.staff === args[0]);
+        return { results: rows };
+    }
+    if (sql.startsWith('SELECT id, staff FROM expenses')) {
+        return tables.expenses.get(args[0]) || null;
+    }
+    if (sql.startsWith('DELETE FROM expenses')) {
+        tables.expenses.delete(args[0]);
+        return { meta: { changes: 1 } };
     }
     // quotes
     if (sql.startsWith('INSERT INTO quotes')) {
@@ -397,6 +497,52 @@ await call('POST', '/api/pos/invoices', { items: [{ code: 'EL-101', qty: 1 }], p
 r = await call('GET', `/api/pos/reports?from=${today2}&to=${today2}`, null, MGR);
 check('report shows debt total + outstanding', r.body.summary.debt_total === 90 && r.body.debtsOutstanding === 90 && r.body.topDebtors.length === 1 && r.body.topDebtors[0].balance === 90);
 
+
+// ===== المرحلة 4 دفعة 1: موردين + مشتريات + مصاريف + نواقص =====
+// موردين
+r = await call('POST', '/api/pos/suppliers', { name: 'شركة النور للكهرباء', phone: '0111' }, CSH);
+check('cashier cannot add supplier', r.status === 403);
+r = await call('POST', '/api/pos/suppliers', { name: 'شركة النور للكهرباء', phone: '0111' }, MGR);
+check('manager adds supplier', r.status === 200 && r.body.id > 0);
+const supId = r.body.id;
+
+// فاتورة شراء: تزود المخزون وتسجل التكلفة ومديونية المورد
+const stockBefore = tables.stock.get('EL-101');
+r = await call('POST', '/api/pos/purchases', { supplierId: supId, paid: 300, items: [{ code: 'EL-101', qty: 10, cost: 60 }] }, MGR);
+check('purchase created', r.status === 200 && /^PO-/.test(r.body.num) && r.body.total === 600);
+check('purchase adds stock', tables.stock.get('EL-101') === stockBefore + 10);
+check('purchase sets cost', tables.costs.get('EL-101') === 60);
+check('supplier owes remainder', tables.suppliers.get(supId).balance === 300);
+check('products expose cost+min', (await call('GET', '/api/pos/products', null, MGR)).body.products.find((p) => p.code === 'EL-101').cost === 60);
+
+// تسديد للمورد
+r = await call('POST', `/api/pos/supplier/${supId}/payment`, { amount: 100 }, MGR);
+check('supplier payment', r.status === 200 && r.body.balance === 200);
+
+// إلغاء فاتورة شراء
+const purId = r.body.id || (await call('GET', '/api/pos/purchases', null, MGR)).body.purchases[0].id;
+r = await call('POST', `/api/pos/purchase/${purId}/void`, null, MGR);
+check('purchase voided', r.status === 200);
+check('void reverses stock', tables.stock.get('EL-101') === stockBefore);
+check('void reverses supplier debt', tables.suppliers.get(supId).balance === -100);
+
+// مصاريف
+r = await call('POST', '/api/pos/expenses', { title: 'مواصلات بضاعة', amount: 150, cat: 'نقل' }, CSH);
+check('cashier adds expense', r.status === 200 && r.body.id > 0);
+const expId = r.body.id;
+r = await call('GET', '/api/pos/expenses', null, CSH);
+check('cashier sees own expenses', r.body.expenses.length === 1);
+r = await call('GET', '/api/pos/expenses?all=1', null, MGR);
+check('manager sees all expenses', r.body.expenses.length === 1);
+r = await call('DELETE', '/api/pos/expense/' + expId, null, CSH);
+check('owner deletes expense', r.status === 200);
+
+// حد النواقص
+r = await call('POST', '/api/pos/stock', { code: 'EL-101', qty: 3, minQty: 5 }, MGR);
+check('set min qty', r.status === 200);
+r = await call('GET', '/api/pos/products', null, CSH);
+const el101 = r.body.products.find((p) => p.code === 'EL-101');
+check('low stock detectable', el101.qty === 3 && el101.min_qty === 5 && el101.qty <= el101.min_qty);
 
 // ===== المرحلة 3: عروض أسعار + باركود + مزامنة مخزون =====
 // باركود

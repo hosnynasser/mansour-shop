@@ -73,3 +73,41 @@ CREATE TABLE IF NOT EXISTS quote_items (
     line_total REAL
 );
 CREATE INDEX IF NOT EXISTS idx_qitems_quote ON quote_items(quote_id);
+CREATE TABLE IF NOT EXISTS suppliers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT,
+    phone TEXT DEFAULT '',
+    notes TEXT DEFAULT '',
+    balance REAL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS purchases (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    num TEXT UNIQUE,
+    ts TEXT,
+    day TEXT,
+    staff TEXT,
+    supplier_id INTEGER DEFAULT 0,
+    supplier_name TEXT DEFAULT '',
+    total REAL,
+    paid REAL DEFAULT 0,
+    status TEXT DEFAULT 'completed',
+    note TEXT DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS purchase_items (
+    purchase_id INTEGER,
+    code TEXT,
+    name TEXT,
+    qty INTEGER,
+    cost REAL
+);
+CREATE TABLE IF NOT EXISTS expenses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts TEXT,
+    day TEXT,
+    title TEXT,
+    amount REAL,
+    cat TEXT DEFAULT 'عام',
+    staff TEXT,
+    note TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_expenses_day ON expenses(day);

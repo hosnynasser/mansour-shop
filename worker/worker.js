@@ -384,9 +384,9 @@ async function getCatalog(env) {
 
 async function posProducts(env) {
     const catalog = await getCatalog(env);
-    const { results } = await env.POS_DB.prepare('SELECT code, qty, barcode FROM stock').all();
+    const { results } = await env.POS_DB.prepare('SELECT code, qty, barcode, cost, min_qty FROM stock').all();
     const info = new Map((results || []).map((r) => [r.code, r]));
-    return catalog.map((p) => ({ name: p.name, code: p.code, price: p.price, cat: p.cat, stock: p.stock !== false, qty: info.get(p.code)?.qty ?? 0, barcode: info.get(p.code)?.barcode || '' }));
+    return catalog.map((p) => ({ name: p.name, code: p.code, price: p.price, cat: p.cat, stock: p.stock !== false, qty: info.get(p.code)?.qty ?? 0, barcode: info.get(p.code)?.barcode || '', cost: info.get(p.code)?.cost ?? 0, min_qty: info.get(p.code)?.min_qty ?? 5 }));
 }
 
 async function handlePos(request, env, path) {
@@ -409,10 +409,15 @@ async function handlePos(request, env, path) {
         try { body = await request.json(); } catch { return json({ error: 'bad_json' }, 400); }
         const code = clean(body.code, 40);
         const qty = Math.max(0, Math.min(1000000, parseInt(body.qty, 10) || 0));
+        const minQty = body.minQty !== undefined ? Math.max(0, Math.min(100000, parseInt(body.minQty, 10) || 0)) : null;
         if (!code) return json({ error: 'bad_fields' }, 400);
-        await env.POS_DB.prepare('INSERT INTO stock (code, qty) VALUES (?, ?) ON CONFLICT(code) DO UPDATE SET qty = excluded.qty').bind(code, qty).run();
+        if (minQty !== null) {
+            await env.POS_DB.prepare('INSERT INTO stock (code, qty, min_qty) VALUES (?, ?, ?) ON CONFLICT(code) DO UPDATE SET qty = excluded.qty, min_qty = excluded.min_qty').bind(code, qty, minQty).run();
+        } else {
+            await env.POS_DB.prepare('INSERT INTO stock (code, qty) VALUES (?, ?) ON CONFLICT(code) DO UPDATE SET qty = excluded.qty').bind(code, qty).run();
+        }
         await syncStockFlags(env);
-        return json({ ok: true, code, qty });
+        return json({ ok: true, code, qty, min_qty: minQty });
     }
 
     // إنشاء فاتورة بيع
@@ -571,6 +576,176 @@ async function handlePos(request, env, path) {
         return json({ from, to, summary: sum, top: top || [], byStaff: byStaff || [], debtsOutstanding: debts?.outstanding ?? 0, topDebtors: topDebtors || [], collectedInRange: collected?.c ?? 0 });
     }
 
+
+
+    // ---- الموردين (مدير فقط) ----
+    if (path === '/api/pos/suppliers' && request.method === 'GET') {
+        const { results } = await env.POS_DB.prepare('SELECT id, name, phone, notes, balance FROM suppliers ORDER BY name LIMIT 500').all();
+        return json({ suppliers: results || [] });
+    }
+    if (path === '/api/pos/suppliers' && request.method === 'POST') {
+        if (!manager) return json({ error: 'forbidden' }, 403);
+        let body;
+        try { body = await request.json(); } catch { return json({ error: 'bad_json' }, 400); }
+        const name = clean(body.name, 120);
+        if (name.length < 2) return json({ error: 'bad_name' }, 400);
+        const r = await env.POS_DB.prepare('INSERT INTO suppliers (name, phone, notes, balance) VALUES (?, ?, ?, 0)').bind(name, clean(body.phone, 30), clean(body.notes, 400)).run();
+        return json({ ok: true, id: r.meta.last_row_id });
+    }
+    if (path.startsWith('/api/pos/supplier/') && request.method === 'GET' && !path.endsWith('/payment')) {
+        const id = parseInt(path.slice('/api/pos/supplier/'.length), 10) || 0;
+        const sup = await env.POS_DB.prepare('SELECT * FROM suppliers WHERE id = ?').bind(id).first();
+        if (!sup) return json({ error: 'not_found' }, 404);
+        const { results: purchases } = await env.POS_DB.prepare('SELECT id, num, ts, total, paid, status FROM purchases WHERE supplier_id = ? ORDER BY id DESC LIMIT 50').bind(id).all();
+        return json({ supplier: sup, purchases: purchases || [] });
+    }
+    if (path.startsWith('/api/pos/supplier/') && request.method === 'PATCH') {
+        if (!manager) return json({ error: 'forbidden' }, 403);
+        const id = parseInt(path.slice('/api/pos/supplier/'.length), 10) || 0;
+        let body;
+        try { body = await request.json(); } catch { return json({ error: 'bad_json' }, 400); }
+        const name = clean(body.name, 120);
+        if (name.length < 2) return json({ error: 'bad_name' }, 400);
+        await env.POS_DB.prepare('UPDATE suppliers SET name = ?, phone = ?, notes = ? WHERE id = ?').bind(name, clean(body.phone, 30), clean(body.notes, 400), id).run();
+        return json({ ok: true });
+    }
+    if (path.startsWith('/api/pos/supplier/') && request.method === 'DELETE') {
+        if (!manager) return json({ error: 'forbidden' }, 403);
+        const id = parseInt(path.slice('/api/pos/supplier/'.length), 10) || 0;
+        const sup = await env.POS_DB.prepare('SELECT balance FROM suppliers WHERE id = ?').bind(id).first();
+        if (!sup) return json({ error: 'not_found' }, 404);
+        if (sup.balance !== 0) return json({ error: 'has_balance' }, 400);
+        await env.POS_DB.prepare('DELETE FROM suppliers WHERE id = ?').bind(id).run();
+        return json({ ok: true });
+    }
+    // تسديد دفعة لمورد
+    if (path.startsWith('/api/pos/supplier/') && path.endsWith('/payment') && request.method === 'POST') {
+        if (!manager) return json({ error: 'forbidden' }, 403);
+        const id = parseInt(path.slice('/api/pos/supplier/'.length, -'/payment'.length), 10) || 0;
+        let body;
+        try { body = await request.json(); } catch { return json({ error: 'bad_json' }, 400); }
+        const amount = Math.round(Math.max(0, Math.min(1e9, Number(body.amount) || 0)) * 100) / 100;
+        if (amount <= 0) return json({ error: 'bad_amount' }, 400);
+        const sup = await env.POS_DB.prepare('SELECT id, balance FROM suppliers WHERE id = ?').bind(id).first();
+        if (!sup) return json({ error: 'not_found' }, 404);
+        const pay = Math.min(amount, sup.balance);
+        const newBalance = Math.round((sup.balance - pay) * 100) / 100;
+        await env.POS_DB.prepare('UPDATE suppliers SET balance = balance - ? WHERE id = ?').bind(pay, id).run();
+        return json({ ok: true, paid: pay, balance: newBalance });
+    }
+
+    // ---- فواتير شراء (بتزود المخزون أوتوماتيك) — مدير فقط ----
+    if (path === '/api/pos/purchases' && request.method === 'POST') {
+        if (!manager) return json({ error: 'forbidden' }, 403);
+        let body;
+        try { body = await request.json(); } catch { return json({ error: 'bad_json' }, 400); }
+        const items = Array.isArray(body.items) ? body.items.slice(0, 100) : [];
+        if (!items.length) return json({ error: 'empty_purchase' }, 400);
+        const catalog = await getCatalog(env);
+        const byCode = new Map(catalog.map((p) => [p.code, p]));
+        const lines = [];
+        for (const it of items) {
+            const p = byCode.get(clean(it.code, 40));
+            if (!p) return json({ error: 'unknown_product', code: clean(it.code, 40) }, 400);
+            const qty = Math.max(1, Math.min(100000, parseInt(it.qty, 10) || 0));
+            const cost = Math.max(0, Math.min(1e9, Number(it.cost) || 0));
+            lines.push({ code: p.code, name: p.name, qty, cost: Math.round(cost * 100) / 100 });
+        }
+        const total = Math.round(lines.reduce((s, l) => s + l.cost * l.qty, 0) * 100) / 100;
+        const paid = Math.max(0, Math.min(total, Number(body.paid) || 0));
+        let supplierId = parseInt(body.supplierId, 10) || 0;
+        let supplierName = '';
+        if (supplierId) {
+            const sup = await env.POS_DB.prepare('SELECT id, name FROM suppliers WHERE id = ?').bind(supplierId).first();
+            if (!sup) return json({ error: 'unknown_supplier' }, 400);
+            supplierName = sup.name;
+        }
+        const r = await env.POS_DB.prepare("INSERT INTO purchases (num, ts, day, staff, supplier_id, supplier_name, total, paid, status, note) VALUES ('', '', '', '', 0, '', 0, 0, 'completed', '')").run();
+        const pid = r.meta.last_row_id;
+        const num = 'PO-' + String(pid).padStart(6, '0');
+        const ts = new Date().toISOString();
+        const day = cairoDay();
+        const stmts = lines.map((l) => env.POS_DB.prepare('INSERT INTO purchase_items (purchase_id, code, name, qty, cost) VALUES (?, ?, ?, ?, ?)').bind(pid, l.code, l.name, l.qty, l.cost));
+        for (const l of lines) {
+            stmts.push(env.POS_DB.prepare('INSERT INTO stock (code, qty, cost) VALUES (?, ?, ?) ON CONFLICT(code) DO UPDATE SET qty = qty + excluded.qty, cost = excluded.cost').bind(l.code, l.qty, l.cost));
+        }
+        stmts.push(env.POS_DB.prepare('UPDATE purchases SET num = ?, ts = ?, day = ?, staff = ?, supplier_id = ?, supplier_name = ?, total = ?, paid = ?, note = ? WHERE id = ?')
+            .bind(num, ts, day, staff.user, supplierId, supplierName, total, Math.round(paid * 100) / 100, clean(body.note, 300), pid));
+        if (supplierId && total > paid) {
+            stmts.push(env.POS_DB.prepare('UPDATE suppliers SET balance = balance + ? WHERE id = ?').bind(Math.round((total - paid) * 100) / 100, supplierId));
+        }
+        await env.POS_DB.batch(stmts);
+        await syncStockFlags(env);
+        return json({ ok: true, id: pid, num, ts, total, paid: Math.round(paid * 100) / 100, owed: Math.round((total - paid) * 100) / 100 });
+    }
+    if (path === '/api/pos/purchases' && request.method === 'GET') {
+        if (!manager) return json({ error: 'forbidden' }, 403);
+        const { results } = await env.POS_DB.prepare('SELECT id, num, ts, staff, supplier_id, supplier_name, total, paid, status, note FROM purchases ORDER BY id DESC LIMIT 200').all();
+        return json({ purchases: results || [] });
+    }
+    if (path.startsWith('/api/pos/purchase/') && request.method === 'GET' && !path.endsWith('/void')) {
+        if (!manager) return json({ error: 'forbidden' }, 403);
+        const id = parseInt(path.slice('/api/pos/purchase/'.length), 10) || 0;
+        const p = await env.POS_DB.prepare('SELECT * FROM purchases WHERE id = ?').bind(id).first();
+        if (!p) return json({ error: 'not_found' }, 404);
+        const { results: items } = await env.POS_DB.prepare('SELECT code, name, qty, cost FROM purchase_items WHERE purchase_id = ?').bind(id).all();
+        return json({ purchase: p, items: items || [] });
+    }
+    // إلغاء فاتورة شراء: بترجع المخزون والمديونية
+    if (path.startsWith('/api/pos/purchase/') && path.endsWith('/void') && request.method === 'POST') {
+        if (!manager) return json({ error: 'forbidden' }, 403);
+        const id = parseInt(path.slice('/api/pos/purchase/'.length, -'/void'.length), 10) || 0;
+        const p = await env.POS_DB.prepare('SELECT * FROM purchases WHERE id = ?').bind(id).first();
+        if (!p) return json({ error: 'not_found' }, 404);
+        if (p.status === 'voided') return json({ error: 'already_voided' }, 400);
+        const { results: items } = await env.POS_DB.prepare('SELECT code, qty FROM purchase_items WHERE purchase_id = ?').bind(id).all();
+        // نتأكد إن المخزون يسمح بالخصم (الصنف ممكن يكون اتباع)
+        for (const l of items || []) {
+            const s = await env.POS_DB.prepare('SELECT qty FROM stock WHERE code = ?').bind(l.code).first();
+            if (!s || s.qty < l.qty) return json({ error: 'stock_too_low', code: l.code }, 400);
+        }
+        const stmts = (items || []).map((l) => env.POS_DB.prepare('UPDATE stock SET qty = qty - ? WHERE code = ?').bind(l.qty, l.code));
+        stmts.push(env.POS_DB.prepare("UPDATE purchases SET status = 'voided' WHERE id = ?").bind(id));
+        if (p.supplier_id && p.total > p.paid) {
+            stmts.push(env.POS_DB.prepare('UPDATE suppliers SET balance = balance - ? WHERE id = ?').bind(p.total - p.paid, p.supplier_id));
+        }
+        await env.POS_DB.batch(stmts);
+        await syncStockFlags(env);
+        return json({ ok: true });
+    }
+
+    // ---- المصاريف اليومية ----
+    if (path === '/api/pos/expenses' && request.method === 'POST') {
+        let body;
+        try { body = await request.json(); } catch { return json({ error: 'bad_json' }, 400); }
+        const title = clean(body.title, 120);
+        const amount = Math.round(Math.max(0, Math.min(1e9, Number(body.amount) || 0)) * 100) / 100;
+        if (title.length < 2 || amount <= 0) return json({ error: 'bad_fields' }, 400);
+        const day = cairoDay();
+        const r = await env.POS_DB.prepare('INSERT INTO expenses (ts, day, title, amount, cat, staff, note) VALUES (?, ?, ?, ?, ?, ?, ?)')
+            .bind(new Date().toISOString(), day, title, amount, clean(body.cat, 40) || 'عام', staff.user, clean(body.note, 300)).run();
+        return json({ ok: true, id: r.meta.last_row_id });
+    }
+    if (path === '/api/pos/expenses' && request.method === 'GET') {
+        const url = new URL(request.url);
+        const date = clean(url.searchParams.get('date'), 10);
+        const all = manager && url.searchParams.get('all') === '1';
+        let sql = 'SELECT id, ts, day, title, amount, cat, staff, note FROM expenses WHERE 1=1';
+        const args = [];
+        if (!manager || !all) { sql += ' AND staff = ?'; args.push(staff.user); }
+        if (date) { sql += ' AND day = ?'; args.push(date); }
+        sql += ' ORDER BY id DESC LIMIT 200';
+        const { results } = await env.POS_DB.prepare(sql).bind(...args).all();
+        return json({ expenses: results || [] });
+    }
+    if (path.startsWith('/api/pos/expense/') && request.method === 'DELETE') {
+        const id = parseInt(path.slice('/api/pos/expense/'.length), 10) || 0;
+        const ex = await env.POS_DB.prepare('SELECT id, staff FROM expenses WHERE id = ?').bind(id).first();
+        if (!ex) return json({ error: 'not_found' }, 404);
+        if (!manager && ex.staff !== staff.user) return json({ error: 'forbidden' }, 403);
+        await env.POS_DB.prepare('DELETE FROM expenses WHERE id = ?').bind(id).run();
+        return json({ ok: true });
+    }
 
     // ---- الباركود: المدير بيربط باركود بصنف ----
     if (path === '/api/pos/barcode' && request.method === 'POST') {
