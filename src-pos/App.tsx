@@ -474,7 +474,8 @@ function Login({ onLogin }: { onLogin: (s: Staff) => void }) {
             <div className="pos-main login-wrap">
                 <div className="login-card">
                     <img src={logo} alt="منصور" />
-                    <h1>كاشير منصور</h1>
+                    <h1>منصور</h1>
+                    <p style={{ letterSpacing: 2, fontWeight: 700, margin: "0 0 4px" }}>MANSOUR POS</p>
                     <p>سجل دخولك علشان تبدأ البيع</p>
                     {err ? <div className="err-box">{err}</div> : null}
                     <div className="field"><input placeholder="اسم المستخدم" value={user} onChange={(e) => setUser(e.target.value)} dir="ltr" style={{ textAlign: 'end' }} autoComplete="username" /></div>
