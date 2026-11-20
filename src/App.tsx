@@ -434,7 +434,7 @@ function Products({ onOpen }: { onOpen: (p: Product) => void }) {
         if (sort === 'high') list = [...list].sort((a, b) => b.price - a.price);
         if (sort === 'name') list = [...list].sort((a, b) => a.name.localeCompare(b.name, 'ar'));
         return list;
-    }, [query, quick, range, sort]);
+    }, [catalog, query, quick, range, sort]);
 
     const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
     const safePage = Math.min(page, pages);
