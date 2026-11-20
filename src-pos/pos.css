@@ -182,3 +182,7 @@ body.printing .print-area{display:block !important}
 .cat-dd-list button{background:none;border:0;border-bottom:1px solid var(--line);padding:13px 16px;text-align:start;font-size:15px;font-weight:600;color:var(--navy)}
 .cat-dd-list button:last-child{border-bottom:0}
 .cat-dd-list button.on{background:#fff8ea;color:var(--amber-d);font-weight:800}
+
+.pos-main{overflow-x:hidden}
+.pos-main input,.pos-main select{min-width:0;max-width:100%}
+.field input[type=date],.pos-main input[type=date]{width:100%;min-width:0;-webkit-appearance:none;appearance:none;min-height:46px}

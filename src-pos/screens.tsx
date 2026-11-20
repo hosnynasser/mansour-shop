@@ -280,10 +280,12 @@ export function CloseScreen({ staff, notify }: { staff: Staff; notify: (m: strin
             </div>
             <div className="close-card" style={{ marginBottom: 12 }}>
                 <h4>💸 مصاريف اليوم</h4>
-                <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
-                    <input placeholder="بيان المصروف" value={exTitle} onChange={(e) => setExTitle(e.target.value)} style={{ flex: 1.6, border: '1.5px solid var(--line)', borderRadius: 10, padding: '9px 10px' }} />
-                    <input inputMode="decimal" placeholder="المبلغ" value={exAmount} onChange={(e) => setExAmount(e.target.value)} style={{ flex: 1, border: '1.5px solid var(--line)', borderRadius: 10, padding: '9px 10px' }} />
-                    <button className="btn btn-navy btn-sm" disabled={exBusy} onClick={addExpense}>{exBusy ? '…' : 'تسجيل'}</button>
+                <div style={{ display: 'grid', gap: 8, marginBottom: 10 }}>
+                    <input placeholder="بيان المصروف" value={exTitle} onChange={(e) => setExTitle(e.target.value)} style={{ width: '100%', minWidth: 0, border: '1.5px solid var(--line)', borderRadius: 10, padding: '9px 10px' }} />
+                    <div style={{ display: 'flex', gap: 8 }}>
+                        <input inputMode="decimal" placeholder="المبلغ" value={exAmount} onChange={(e) => setExAmount(e.target.value)} style={{ flex: 1, minWidth: 0, width: '100%', border: '1.5px solid var(--line)', borderRadius: 10, padding: '9px 10px' }} />
+                        <button className="btn btn-navy btn-sm" style={{ flex: 'none' }} disabled={exBusy} onClick={addExpense}>{exBusy ? '…' : 'تسجيل'}</button>
+                    </div>
                 </div>
                 {expenses.length === 0 ? <div style={{ fontSize: 13, color: 'var(--muted)' }}>مفيش مصاريف مسجلة في اليوم ده</div> : (
                     <>
