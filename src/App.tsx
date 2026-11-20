@@ -950,21 +950,50 @@ export function App() {
     }, []);
 
     // سحب لتحديث الصفحة على الموبايل (الشيل ثابت فالمتصفح مش بيعملها لوحده)
-    const ptrRef = { y: 0, active: false };
+    // مستمعين native على المستند: React بيخلي touchmove passive، ولو الموقع ساب overscroll
+    // ب auto كروم أندرويد بيبلع السحبة. هنا بنلاقي أقرب حاوية سكرول (الرئيسية أو أي شيت) ومنمنع الافتراضي.
     const [ptr, setPtr] = useState(0);
-    const onMainTouchStart = (e: React.TouchEvent) => {
-        const m = e.currentTarget as HTMLElement;
-        if (m.scrollTop <= 0) { ptrRef.y = e.touches[0].clientY; ptrRef.active = true; }
-    };
-    const onMainTouchMove = (e: React.TouchEvent) => {
-        if (!ptrRef.active) return;
-        const d = e.touches[0].clientY - ptrRef.y;
-        setPtr(d > 0 ? Math.min(d, 140) : 0);
-    };
-    const onMainTouchEnd = () => {
-        if (ptrRef.active && ptr > 90) { window.location.reload(); return; }
-        ptrRef.active = false; setPtr(0);
-    };
+    useEffect(() => {
+        const st = { y: 0, d: 0, active: false, el: null as HTMLElement | null };
+        const findScroller = (t: EventTarget | null): HTMLElement | null => {
+            let n = t as HTMLElement | null;
+            while (n && n !== document.body) {
+                const ov = getComputedStyle(n).overflowY;
+                if ((ov === 'auto' || ov === 'scroll') && n.scrollHeight > n.clientHeight + 4) return n;
+                n = n.parentElement;
+            }
+            return document.querySelector('.app-main');
+        };
+        const onStart = (e: TouchEvent) => {
+            if (e.touches.length !== 1) { st.active = false; return; }
+            st.el = findScroller(e.target);
+            if (st.el && st.el.scrollTop <= 0) { st.y = e.touches[0].clientY; st.d = 0; st.active = true; }
+            else st.active = false;
+        };
+        const onMove = (e: TouchEvent) => {
+            if (!st.active || !st.el) return;
+            const d = e.touches[0].clientY - st.y;
+            if (d > 0 && st.el.scrollTop <= 0) {
+                if (e.cancelable) e.preventDefault();
+                st.d = Math.min(d, 140);
+                setPtr(st.d);
+            } else { st.d = 0; setPtr(0); }
+        };
+        const onEnd = () => {
+            if (st.active && st.d > 90) { st.d = 0; window.location.reload(); return; }
+            st.active = false; st.d = 0; setPtr(0);
+        };
+        document.addEventListener('touchstart', onStart, { passive: true });
+        document.addEventListener('touchmove', onMove, { passive: false });
+        document.addEventListener('touchend', onEnd);
+        document.addEventListener('touchcancel', onEnd);
+        return () => {
+            document.removeEventListener('touchstart', onStart);
+            document.removeEventListener('touchmove', onMove);
+            document.removeEventListener('touchend', onEnd);
+            document.removeEventListener('touchcancel', onEnd);
+        };
+    }, []);
 
     const showToast = (msg: string) => {
         setToast(msg);
@@ -1007,7 +1036,7 @@ export function App() {
                     </nav>
                     <HeaderCallLink className="header-call" aria-label="اتصل بالمحل"><Ic id="i-phone" /></HeaderCallLink>
                 </header>
-                <main className="app-main" onTouchStart={onMainTouchStart} onTouchMove={onMainTouchMove} onTouchEnd={onMainTouchEnd}>
+                <main className="app-main">
                     {ptr > 12 && <div className={'ptr-ind' + (ptr > 90 ? ' ready' : '')} style={{ opacity: Math.min(1, ptr / 60) }}>{ptr > 90 ? 'سيب عشان التحديث ⟳' : '⟳'}</div>}
                     <Routes>
                         <Route path="/" element={<Home />} />

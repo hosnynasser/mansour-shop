@@ -459,8 +459,6 @@ button.footer-admin{font-family:inherit}
 .admin-user-actions{display:flex;gap:6px}
 .admin-tabs{flex-wrap:wrap}
 
-/* pull-to-refresh: السماح بسحب الصفحة لتحديثها على الموبايل */
-.app-main{overscroll-behavior-y:auto}
-.sheet-page{overscroll-behavior-y:auto}
-.ptr-ind{position:sticky;top:0;z-index:30;display:flex;justify-content:center;align-items:center;height:0;color:var(--navy);font-weight:700;font-size:14px;transform:translateY(10px)}
+/* pull-to-refresh: ممنوع overscroll-behavior:auto هنا — بيبلع السحبة على أندرويد. السحب لتحديث مخصص بالجافاسكربت */
+.ptr-ind{position:fixed;top:0;left:0;right:0;z-index:200;pointer-events:none;display:flex;justify-content:center;align-items:center;height:44px;color:var(--navy);font-weight:700;font-size:14px;background:linear-gradient(#fff,#fff8)}
 .ptr-ind.ready{color:var(--amber,#b45309)}
