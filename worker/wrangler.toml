@@ -5,3 +5,9 @@ compatibility_date = "2026-11-20"
 [[kv_namespaces]]
 binding = "SHOP_KV"
 id = "ceb6e2d5ddf24cd68417e1737d06f5a9"
+
+# POS database (D1) — يتملى بعد إنشاء القاعدة: wrangler d1 create mansour-pos
+# [[d1_databases]]
+# binding = "POS_DB"
+# database_name = "mansour-pos"
+# database_id = "PUT_D1_DATABASE_ID_HERE"

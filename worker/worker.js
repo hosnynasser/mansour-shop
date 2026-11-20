@@ -45,20 +45,26 @@ async function getAdmins(env) {
     try { const a = JSON.parse(raw); return Array.isArray(a) ? a : []; } catch { return []; }
 }
 
-async function isAdmin(request, env) {
+// يرجع {user, role} أو null. role: 'manager' | 'cashier' — الحسابات القديمة من غير role تعتبر مدير
+async function staffAuth(request, env) {
     const h = request.headers.get('X-Admin-Code') || '';
-    if (!h) return false;
-    if (env.ADMIN_CODE && h === env.ADMIN_CODE) return true;
+    if (!h) return null;
+    if (env.ADMIN_CODE && h === env.ADMIN_CODE) return { user: 'master', role: 'manager' };
     const i = h.indexOf(':');
     if (i > 0) {
         const user = clean(h.slice(0, i), 40);
         const pass = h.slice(i + 1).slice(0, 100);
-        if (!user || !pass) return false;
+        if (!user || !pass) return null;
         const hash = await sha256(pass);
         const admins = await getAdmins(env);
-        return admins.some((a) => a.user === user && a.hash === hash);
+        const a = admins.find((x) => x.user === user && x.hash === hash);
+        if (a) return { user: a.user, role: a.role === 'cashier' ? 'cashier' : 'manager' };
     }
-    return false;
+    return null;
+}
+
+async function isAdmin(request, env) {
+    return (await staffAuth(request, env)) !== null;
 }
 
 // Default catalog: matches the site's embedded list so orders work before the first admin save
@@ -208,6 +214,12 @@ async function handle(request, env) {
         return json({ ok: true, id, total });
     }
 
+    // ---- POS (كاشير) ----
+    if (path.startsWith('/api/pos/')) {
+        if (!env.POS_DB) return json({ error: 'pos_not_ready' }, 503);
+        return handlePos(request, env, path);
+    }
+
     // ---- admin (all routes below require auth) ----
     if (path.startsWith('/api/admin/')) {
         if (!(await isAdmin(request, env))) return json({ error: 'unauthorized' }, 401);
@@ -281,7 +293,7 @@ async function handle(request, env) {
 
         if (path === '/api/admin/admins' && request.method === 'GET') {
             const admins = await getAdmins(env);
-            return json({ admins: admins.map((a) => ({ user: a.user })) });
+            return json({ admins: admins.map((a) => ({ user: a.user, role: a.role === 'cashier' ? 'cashier' : 'manager' })) });
         }
 
         if (path === '/api/admin/admins' && request.method === 'POST') {
@@ -289,12 +301,13 @@ async function handle(request, env) {
             try { body = await request.json(); } catch { return json({ error: 'bad_json' }, 400); }
             const user = clean(body.user, 40);
             const pass = String(body.pass ?? '');
+            const role = body.role === 'cashier' ? 'cashier' : 'manager';
             if (user.length < 3 || pass.length < 6 || pass.length > 100) return json({ error: 'bad_fields' }, 400);
             if (user.includes(':')) return json({ error: 'bad_fields' }, 400);
             const admins = await getAdmins(env);
             if (admins.length >= 10) return json({ error: 'too_many' }, 400);
             if (admins.some((a) => a.user === user)) return json({ error: 'user_exists' }, 400);
-            admins.push({ user, hash: await sha256(pass) });
+            admins.push({ user, hash: await sha256(pass), role });
             await env.SHOP_KV.put('admins', JSON.stringify(admins));
             return json({ ok: true });
         }
@@ -317,6 +330,7 @@ async function handle(request, env) {
                 if (newPass.length < 6 || newPass.length > 100) return json({ error: 'bad_fields' }, 400);
                 a.hash = await sha256(newPass);
             }
+            if (body.newRole === 'cashier' || body.newRole === 'manager') a.role = body.newRole;
             await env.SHOP_KV.put('admins', JSON.stringify(admins));
             return json({ ok: true });
         }
@@ -344,3 +358,141 @@ export default {
         return handle(request, env).catch(() => json({ error: 'server_error' }, 500));
     },
 };
+
+// ================= POS / الكاشير (بياناته في D1: POS_DB) =================
+const PAYMENTS = ['cash', 'vcash'];
+
+async function getCatalog(env) {
+    return (await getProducts(env)) || EMBEDDED_PRODUCTS;
+}
+
+async function posProducts(env) {
+    const catalog = await getCatalog(env);
+    const { results } = await env.POS_DB.prepare('SELECT code, qty FROM stock').all();
+    const qty = new Map((results || []).map((r) => [r.code, r.qty]));
+    return catalog.map((p) => ({ name: p.name, code: p.code, price: p.price, cat: p.cat, stock: p.stock !== false, qty: qty.get(p.code) ?? 0 }));
+}
+
+async function handlePos(request, env, path) {
+    const staff = await staffAuth(request, env);
+    if (!staff) return json({ error: 'unauthorized' }, 401);
+    const manager = staff.role === 'manager';
+
+    if (path === '/api/pos/me' && request.method === 'GET') {
+        return json({ user: staff.user, role: staff.role });
+    }
+
+    if (path === '/api/pos/products' && request.method === 'GET') {
+        return json({ products: await posProducts(env) });
+    }
+
+    // ضبط رصيد صنف (مدير فقط)
+    if (path === '/api/pos/stock' && request.method === 'POST') {
+        if (!manager) return json({ error: 'forbidden' }, 403);
+        let body;
+        try { body = await request.json(); } catch { return json({ error: 'bad_json' }, 400); }
+        const code = clean(body.code, 40);
+        const qty = Math.max(0, Math.min(1000000, parseInt(body.qty, 10) || 0));
+        if (!code) return json({ error: 'bad_fields' }, 400);
+        await env.POS_DB.prepare('INSERT INTO stock (code, qty) VALUES (?, ?) ON CONFLICT(code) DO UPDATE SET qty = excluded.qty').bind(code, qty).run();
+        return json({ ok: true, code, qty });
+    }
+
+    // إنشاء فاتورة بيع
+    if (path === '/api/pos/invoices' && request.method === 'POST') {
+        let body;
+        try { body = await request.json(); } catch { return json({ error: 'bad_json' }, 400); }
+        const items = Array.isArray(body.items) ? body.items.slice(0, 100) : [];
+        if (!items.length) return json({ error: 'empty_invoice' }, 400);
+        const payment = PAYMENTS.includes(body.payment) ? body.payment : 'cash';
+        const catalog = await getCatalog(env);
+        const byCode = new Map(catalog.map((p) => [p.code, p]));
+
+        const lines = [];
+        for (const it of items) {
+            const p = byCode.get(clean(it.code, 40));
+            if (!p) return json({ error: 'unknown_product', code: clean(it.code, 40) }, 400);
+            const qty = Math.max(1, Math.min(9999, parseInt(it.qty, 10) || 1));
+            const disc = Math.max(0, Math.min(1e9, Number(it.discount) || 0));
+            const lineTotal = Math.max(0, Math.round((p.price * qty - disc) * 100) / 100);
+            lines.push({ code: p.code, name: p.name, price: p.price, qty, discount: Math.round(disc * 100) / 100, lineTotal });
+        }
+        const subtotal = Math.round(lines.reduce((s, l) => s + l.lineTotal, 0) * 100) / 100;
+        const invDisc = Math.max(0, Math.min(subtotal, Number(body.discount) || 0));
+        const total = Math.round((subtotal - invDisc) * 100) / 100;
+
+        // إنقاص المخزون بشكل ذرّي: أي صنف كميته مش كفاية يوقف العملية كلها
+        const stmts = [];
+        for (const l of lines) {
+            stmts.push(env.POS_DB.prepare("UPDATE stock SET qty = qty - ? WHERE code = ? AND qty >= ?").bind(l.qty, l.code, l.qty));
+        }
+        stmts.push(env.POS_DB.prepare("INSERT INTO invoices (num, ts, day, staff, payment, subtotal, discount, total, status, customer_name, customer_phone) VALUES ('', '', '', '', '', 0, 0, 0, 'pending', '', '')"));
+        const results = await env.POS_DB.batch(stmts);
+        for (let i = 0; i < lines.length; i++) {
+            if ((results[i].meta?.changes ?? 0) === 0) return json({ error: 'insufficient_stock', code: lines[i].code }, 400);
+        }
+        const invoiceId = results[results.length - 1].meta.last_row_id;
+        const num = 'INV-' + String(invoiceId).padStart(6, '0');
+        const ts = new Date().toISOString();
+        let day = ts.slice(0, 10);
+        try { day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()); } catch {}
+        const itemStmts = lines.map((l) => env.POS_DB.prepare('INSERT INTO invoice_items (invoice_id, code, name, price, qty, discount, line_total) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(invoiceId, l.code, l.name, l.price, l.qty, l.discount, l.lineTotal));
+        itemStmts.push(env.POS_DB.prepare("UPDATE invoices SET num = ?, ts = ?, day = ?, staff = ?, payment = ?, subtotal = ?, discount = ?, total = ?, status = 'completed', customer_name = ?, customer_phone = ? WHERE id = ?")
+            .bind(num, ts, day, staff.user, payment, subtotal, Math.round(invDisc * 100) / 100, total, clean(body.customerName, 120), clean(body.customerPhone, 30), invoiceId));
+        await env.POS_DB.batch(itemStmts);
+        return json({ ok: true, id: invoiceId, num, ts, total });
+    }
+
+    // قائمة الفواتير (الكاشير يشوف فواتيره بس، المدير يشوف الكل)
+    if (path === '/api/pos/invoices' && request.method === 'GET') {
+        const url = new URL(request.url);
+        const date = clean(url.searchParams.get('date'), 10); // YYYY-MM-DD (يوم القاهرة بيتحسب في الواجهة)
+        const all = manager && url.searchParams.get('all') === '1';
+        let sql = "SELECT id, num, ts, staff, payment, subtotal, discount, total, status, customer_name, customer_phone FROM invoices WHERE status != 'pending'";
+        const args = [];
+        if (!manager || !all) { sql += ' AND staff = ?'; args.push(staff.user); }
+        if (date) { sql += ' AND day = ?'; args.push(date); }
+        sql += ' ORDER BY id DESC LIMIT 200';
+        const { results } = await env.POS_DB.prepare(sql).bind(...args).all();
+        return json({ invoices: results || [] });
+    }
+
+    // فاتورة واحدة بالأصناف
+    if (path.startsWith('/api/pos/invoice/') && request.method === 'GET') {
+        const id = parseInt(path.slice('/api/pos/invoice/'.length), 10) || 0;
+        const inv = await env.POS_DB.prepare("SELECT * FROM invoices WHERE id = ? AND status != 'pending'").bind(id).first();
+        if (!inv) return json({ error: 'not_found' }, 404);
+        if (!manager && inv.staff !== staff.user) return json({ error: 'forbidden' }, 403);
+        const { results: items } = await env.POS_DB.prepare('SELECT code, name, price, qty, discount, line_total FROM invoice_items WHERE invoice_id = ?').bind(id).all();
+        return json({ invoice: inv, items: items || [] });
+    }
+
+    // إلغاء فاتورة (مدير فقط) مع رجعة المخزون
+    if (path.startsWith('/api/pos/invoice/') && path.endsWith('/void') && request.method === 'POST') {
+        if (!manager) return json({ error: 'forbidden' }, 403);
+        const id = parseInt(path.slice('/api/pos/invoice/'.length, -'/void'.length), 10) || 0;
+        const inv = await env.POS_DB.prepare('SELECT id, status FROM invoices WHERE id = ?').bind(id).first();
+        if (!inv) return json({ error: 'not_found' }, 404);
+        if (inv.status === 'voided') return json({ error: 'already_voided' }, 400);
+        const { results: items } = await env.POS_DB.prepare('SELECT code, qty FROM invoice_items WHERE invoice_id = ?').bind(id).all();
+        const stmts = (items || []).map((l) => env.POS_DB.prepare('INSERT INTO stock (code, qty) VALUES (?, ?) ON CONFLICT(code) DO UPDATE SET qty = qty + excluded.qty').bind(l.code, l.qty));
+        stmts.push(env.POS_DB.prepare("UPDATE invoices SET status = 'voided' WHERE id = ?").bind(id));
+        await env.POS_DB.batch(stmts);
+        return json({ ok: true });
+    }
+
+    // تقفيلة اليوم لكل موظف (الكاشير يشوف بتاعته بس)
+    if (path === '/api/pos/close' && request.method === 'GET') {
+        const url = new URL(request.url);
+        const date = clean(url.searchParams.get('date'), 10);
+        if (!date) return json({ error: 'missing_date' }, 400);
+        let sql = "SELECT staff, COUNT(*) AS count, SUM(total) AS total, SUM(CASE WHEN payment = 'cash' THEN total ELSE 0 END) AS cash_total, SUM(CASE WHEN payment = 'vcash' THEN total ELSE 0 END) AS vcash_total FROM invoices WHERE status = 'completed' AND day = ?";
+        const args = [date];
+        if (!manager) { sql += ' AND staff = ?'; args.push(staff.user); }
+        sql += ' GROUP BY staff ORDER BY total DESC';
+        const { results } = await env.POS_DB.prepare(sql).bind(...args).all();
+        return json({ date, rows: results || [] });
+    }
+
+    return json({ error: 'not_found' }, 404);
+}
