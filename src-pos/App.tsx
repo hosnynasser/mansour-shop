@@ -280,7 +280,7 @@ export default function App() {
             <div className="pos-top">
                 <img src={logo} alt="منصور" />
                 <div>
-                    <div className="t1">كاشير منصور</div>
+                    <div className="t1">منصور</div>
                     <div className="t2">MANSOUR POS</div>
                 </div>
                 <div className="who">
