@@ -274,3 +274,5 @@ body{line-height:1.5;letter-spacing:0}
 .login-card{border-radius:28px;box-shadow:var(--sh2);animation:scrIn .4s var(--ease) both}
 
 @media (prefers-reduced-motion:reduce){*{animation-duration:.01ms !important;transition-duration:.01ms !important}}
+.prod-card .pn{padding-inline-end:34px;font-size:14px;line-height:1.4}
+.prod-card .pc{margin-top:2px}
