@@ -981,14 +981,19 @@ export function App() {
     const [ptr, setPtr] = useState(0);
     useEffect(() => {
         const st = { y: 0, d: 0, active: false, el: null as HTMLElement | null };
+        // أقرب حاوية بتسكرول فعلا هي المرجع؛ لو السحبة جوه شيت (لوحة التحكم/السلة) ومحتواها قصير
+        // ومش بيسكرول، نرجع للشيت نفسه مش للصفحة الرئيسية — لأن الرئيسية ممكن تكون نازلة تحت
+        // عند الفوتر فتبقى scrollTop > 0 والسحبة ماتتعملش أبدا
         const findScroller = (t: EventTarget | null): HTMLElement | null => {
             let n = t as HTMLElement | null;
+            let sheet: HTMLElement | null = null;
             while (n && n !== document.body) {
+                if (n.classList && n.classList.contains('sheet-page')) sheet = n;
                 const ov = getComputedStyle(n).overflowY;
                 if ((ov === 'auto' || ov === 'scroll') && n.scrollHeight > n.clientHeight + 4) return n;
                 n = n.parentElement;
             }
-            return document.querySelector('.app-main');
+            return sheet || document.querySelector('.app-main');
         };
         const onStart = (e: TouchEvent) => {
             if (e.touches.length !== 1) { st.active = false; return; }
