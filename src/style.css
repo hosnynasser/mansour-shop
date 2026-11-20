@@ -426,3 +426,6 @@ html,body{height:100%;overflow:hidden}
 .footer-admin{display:inline-block;margin-top:10px;font-size:12px;color:var(--muted);opacity:.75;text-decoration:underline}
 .admin-body{flex:1;overflow-y:auto}
 button.footer-admin{background:none;border:none;cursor:pointer;font-family:inherit;padding:0}
+
+/* footer clear of fixed bottom nav on mobile */
+@media(max-width:1000px){.footer{padding-bottom:calc(110px + env(safe-area-inset-bottom))}}
