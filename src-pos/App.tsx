@@ -5,8 +5,24 @@ import SellScreen from './SellScreen';
 import { CloseScreen, CustomersScreen, InvoicesScreen, ReportsScreen, StaffScreen, StockScreen } from './screens';
 import PurchasesScreen from './PurchasesScreen';
 import PrintDoc from './PrintDoc';
+import PayrollHub, { AttendanceStrip } from './PayrollScreen';
 import SharePdf from './SharePdf';
 import logo from '../src/photos/logo-mansour.png';
+
+function StaffHub({ me, notify }: { me: Staff; notify: (m: string, b?: boolean) => void }) {
+    const [v, setV] = useState<'acc' | 'pay'>('acc');
+    const [names, setNames] = useState<string[]>([]);
+    useEffect(() => { api('/api/admin/admins').then((r) => setNames((r.admins || []).map((a: any) => a.user))).catch(() => {}); }, []);
+    return (
+        <>
+            <div className="pay-toggle" style={{ marginBottom: 12 }}>
+                <button className={v === 'acc' ? 'on' : ''} onClick={() => setV('acc')}>👥 الحسابات</button>
+                <button className={v === 'pay' ? 'on' : ''} onClick={() => setV('pay')}>⏱️ الحضور والمرتبات</button>
+            </div>
+            {v === 'acc' ? <StaffScreen me={me} notify={notify} /> : <PayrollHub me={me} staffNames={names} notify={notify} />}
+        </>
+    );
+}
 
 type Tab = 'sell' | 'invoices' | 'customers' | 'stock' | 'purchases' | 'close' | 'reports' | 'staff';
 
@@ -195,6 +211,8 @@ export default function App() {
                 </div>
             </div>
 
+            <AttendanceStrip notify={notify} />
+
             <div className="pos-main">
                 {tab === 'sell' ? <SellScreen products={products} onDone={(inv, items) => { setDone({ inv, items }); }} onNeedRefresh={refreshProducts} notify={notify} /> : null}
                 {tab === 'invoices' ? <InvoicesScreen staff={staff} openInvoice={openInvoice} openQuote={openQuote} notify={notify} /> : null}
@@ -203,7 +221,7 @@ export default function App() {
                 {tab === 'purchases' && manager ? <PurchasesScreen products={products} refresh={refreshProducts} notify={notify} onChequesChanged={() => refreshChequeAlerts(false)} /> : null}
                 {tab === 'close' ? <CloseScreen staff={staff} notify={notify} /> : null}
                 {tab === 'reports' && manager ? <ReportsScreen notify={notify} /> : null}
-                {tab === 'staff' && manager ? <StaffScreen me={staff} notify={notify} /> : null}
+                {tab === 'staff' && manager ? <StaffHub me={staff} notify={notify} /> : null}
             </div>
 
             <nav className="pos-nav">
@@ -225,6 +243,7 @@ export default function App() {
                                 <h2>تم تسجيل البيع</h2>
                                 <div className="no">{done.inv.num} · {paymentLabel(done.inv.payment)}</div>
                                 <div className="tt">{fmt(done.inv.total)} ج</div>
+                                {done.inv.pointsEarned ? <div style={{ fontSize: 13, color: 'var(--amber-d)', fontWeight: 700 }}>⭐ كسب {done.inv.pointsEarned} نقطة · رصيده {done.inv.pointsBalance} نقطة</div> : null}
                             </div>
                             <div style={{ display: 'grid', gap: 8 }}>
                                 <button className="btn btn-blue btn-block" onClick={() => setPrintJob({ ...done, mode: 'r80' })}>🖨️ طباعة إيصال (80مم)</button>

@@ -11,9 +11,10 @@ export interface Invoice {
     id: number; num: string; ts: string; staff: string; payment: string;
     subtotal: number; discount: number; total: number; status: string;
     customer_name: string; customer_phone: string;
+    pointsEarned?: number; pointsBalance?: number;
 }
 export interface InvoiceItem { code: string; name: string; price: number; qty: number; discount: number; line_total: number; }
-export interface Customer { id: number; name: string; phone: string; notes: string; balance?: number; }
+export interface Customer { id: number; name: string; phone: string; notes: string; balance?: number; points?: number; }
 export interface LedgerEntry { id: number; ts: string; kind: 'charge' | 'payment'; amount: number; invoice_id: number | null; staff: string; note: string; }
 export interface Report {
     from: string; to: string;

@@ -464,6 +464,7 @@ async function handlePos(request, env, path) {
         const stmts = (items || []).map((l) => env.POS_DB.prepare('INSERT INTO stock (code, qty) VALUES (?, ?) ON CONFLICT(code) DO UPDATE SET qty = qty + excluded.qty').bind(l.code, l.qty));
         stmts.push(env.POS_DB.prepare("UPDATE invoices SET status = 'voided' WHERE id = ?").bind(id));
         stmts.push(env.POS_DB.prepare("DELETE FROM ledger WHERE invoice_id = ? AND kind = 'charge'").bind(id));
+        stmts.push(env.POS_DB.prepare('DELETE FROM points_log WHERE invoice_id = ?').bind(id));
         await env.POS_DB.batch(stmts);
         await syncStockFlags(env);
         return json({ ok: true });
@@ -485,7 +486,7 @@ async function handlePos(request, env, path) {
 
     // ---- العملاء والمديونيات ----
     if (path === '/api/pos/customers' && request.method === 'GET') {
-        const { results } = await env.POS_DB.prepare("SELECT c.id, c.name, c.phone, c.notes, COALESCE((SELECT SUM(CASE WHEN l.kind = 'charge' THEN l.amount ELSE -l.amount END) FROM ledger l WHERE l.customer_id = c.id), 0) AS balance FROM customers c ORDER BY c.name").all();
+        const { results } = await env.POS_DB.prepare("SELECT c.id, c.name, c.phone, c.notes, COALESCE((SELECT SUM(CASE WHEN l.kind = 'charge' THEN l.amount ELSE -l.amount END) FROM ledger l WHERE l.customer_id = c.id), 0) AS balance, COALESCE((SELECT SUM(delta) FROM points_log pl WHERE pl.customer_id = c.id), 0) AS points FROM customers c ORDER BY c.name").all();
         return json({ customers: results || [] });
     }
 
@@ -530,7 +531,9 @@ async function handlePos(request, env, path) {
         const { results: ledger } = await env.POS_DB.prepare('SELECT id, ts, kind, amount, invoice_id, staff, note FROM ledger WHERE customer_id = ? ORDER BY id DESC LIMIT 100').bind(id).all();
         const bal = await env.POS_DB.prepare("SELECT COALESCE(SUM(CASE WHEN kind = 'charge' THEN amount ELSE -amount END), 0) AS b FROM ledger WHERE customer_id = ?").bind(id).first();
         const { results: invoices } = await env.POS_DB.prepare("SELECT id, num, ts, staff, payment, total, status FROM invoices WHERE customer_id = ? AND status != 'pending' ORDER BY id DESC LIMIT 50").bind(id).all();
-        return json({ customer, ledger: ledger || [], balance: bal?.b ?? 0, invoices: invoices || [] });
+        const { results: plog } = await env.POS_DB.prepare('SELECT ts, delta, kind, invoice_id, note FROM points_log WHERE customer_id = ? ORDER BY id DESC LIMIT 30').bind(id).all();
+        const settings = await loyaltySettings(env);
+        return json({ customer, ledger: ledger || [], balance: bal?.b ?? 0, invoices: invoices || [], points: await customerPoints(env, id), pointsLog: plog || [], loyalty: settings });
     }
 
     // تسجيل دفعة من عميل (الكاشير يقدر — تحصيل فلوس شغلانه)
@@ -911,6 +914,139 @@ async function handlePos(request, env, path) {
         return json({ kind, headers, rows });
     }
 
+    // ---- نقاط الولاء ----
+    if (path === '/api/pos/loyalty' && request.method === 'GET') {
+        return json({ settings: await loyaltySettings(env) });
+    }
+    if (path === '/api/pos/loyalty' && request.method === 'PUT') {
+        if (!manager) return json({ error: 'forbidden' }, 403);
+        let body;
+        try { body = await request.json(); } catch { return json({ error: 'bad_json' }, 400); }
+        const earnEvery = Math.max(1, Math.min(100000, Number(body.earnEvery) || 0));
+        const pointValue = Math.max(0.01, Math.min(1000, Number(body.pointValue) || 0));
+        const enabled = body.enabled === false ? 0 : 1;
+        if (!Number(body.earnEvery) || !Number(body.pointValue)) return json({ error: 'bad_fields' }, 400);
+        await env.POS_DB.batch([
+            env.POS_DB.prepare("INSERT INTO settings (k, v) VALUES ('loyalty_earn_every', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v").bind(String(earnEvery)),
+            env.POS_DB.prepare("INSERT INTO settings (k, v) VALUES ('loyalty_point_value', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v").bind(String(pointValue)),
+            env.POS_DB.prepare("INSERT INTO settings (k, v) VALUES ('loyalty_enabled', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v").bind(String(enabled)),
+        ]);
+        return json({ ok: true, settings: await loyaltySettings(env) });
+    }
+    // تعديل يدوي لنقاط عميل (مدير فقط)
+    if (path.startsWith('/api/pos/customer/') && path.endsWith('/points') && request.method === 'POST') {
+        if (!manager) return json({ error: 'forbidden' }, 403);
+        const id = parseInt(path.slice('/api/pos/customer/'.length, -'/points'.length), 10) || 0;
+        let body;
+        try { body = await request.json(); } catch { return json({ error: 'bad_json' }, 400); }
+        const delta = Math.max(-1000000, Math.min(1000000, parseInt(body.delta, 10) || 0));
+        if (!delta) return json({ error: 'bad_fields' }, 400);
+        const c = await env.POS_DB.prepare('SELECT id FROM customers WHERE id = ?').bind(id).first();
+        if (!c) return json({ error: 'not_found' }, 404);
+        await env.POS_DB.prepare("INSERT INTO points_log (customer_id, ts, day, delta, kind, invoice_id, note) VALUES (?, ?, ?, ?, 'adjust', NULL, ?)").bind(id, new Date().toISOString(), cairoDay(), delta, clean(body.note, 120) || 'تعديل يدوي').run();
+        return json({ ok: true, points: await customerPoints(env, id) });
+    }
+
+    // ---- الحضور والانصراف ----
+    if (path === '/api/pos/attendance/me' && request.method === 'GET') {
+        const day = cairoDay();
+        const row = await env.POS_DB.prepare('SELECT id, check_in, check_out FROM attendance WHERE user = ? AND day = ? ORDER BY id DESC LIMIT 1').bind(staff.user, day).first();
+        return json({ user: staff.user, day, row: row || null });
+    }
+    if (path === '/api/pos/attendance/in' && request.method === 'POST') {
+        const day = cairoDay();
+        const open = await env.POS_DB.prepare("SELECT id FROM attendance WHERE user = ? AND day = ? AND (check_out IS NULL OR check_out = '')").bind(staff.user, day).first();
+        if (open) return json({ error: 'already_in' }, 400);
+        const r = await env.POS_DB.prepare('INSERT INTO attendance (user, day, check_in, check_out, manual) VALUES (?, ?, ?, ?, 0)').bind(staff.user, day, new Date().toISOString(), '').run();
+        return json({ ok: true, id: r.meta.last_row_id });
+    }
+    if (path === '/api/pos/attendance/out' && request.method === 'POST') {
+        const day = cairoDay();
+        const open = await env.POS_DB.prepare("SELECT id FROM attendance WHERE user = ? AND day = ? AND (check_out IS NULL OR check_out = '') ORDER BY id DESC LIMIT 1").bind(staff.user, day).first();
+        if (!open) return json({ error: 'not_in' }, 400);
+        await env.POS_DB.prepare('UPDATE attendance SET check_out = ? WHERE id = ?').bind(new Date().toISOString(), open.id).run();
+        return json({ ok: true });
+    }
+    if (path === '/api/pos/attendance' && request.method === 'GET') {
+        if (!manager) return json({ error: 'forbidden' }, 403);
+        const month = clean(new URL(request.url).searchParams.get('month'), 7) || cairoDay().slice(0, 7);
+        const { results } = await env.POS_DB.prepare('SELECT id, user, day, check_in, check_out, manual FROM attendance WHERE day >= ? AND day <= ? ORDER BY day DESC, id DESC LIMIT 500').bind(month + '-01', month + '-31').all();
+        return json({ month, rows: results || [] });
+    }
+    // تسجيل يدوي (لو الموظف نسي) — مدير فقط. times بتوقيت القاهرة HH:MM
+    if (path === '/api/pos/attendance' && request.method === 'POST') {
+        if (!manager) return json({ error: 'forbidden' }, 403);
+        let body;
+        try { body = await request.json(); } catch { return json({ error: 'bad_json' }, 400); }
+        const user = clean(body.user, 40), day = clean(body.day, 10);
+        if (!user || !/^\d{4}-\d{2}-\d{2}$/.test(day) || !/^\d{1,2}:\d{2}$/.test(String(body.in || ''))) return json({ error: 'bad_fields' }, 400);
+        const iso = (hhmm) => cairoToIso(day, hhmm);
+        const cin = iso(body.in);
+        const cout = /^\d{1,2}:\d{2}$/.test(String(body.out || '')) ? iso(body.out) : '';
+        if (!cin) return json({ error: 'bad_fields' }, 400);
+        const r = await env.POS_DB.prepare('INSERT INTO attendance (user, day, check_in, check_out, manual) VALUES (?, ?, ?, ?, 1)').bind(user, day, cin, cout).run();
+        return json({ ok: true, id: r.meta.last_row_id });
+    }
+    if (path.startsWith('/api/pos/attendance/') && request.method === 'DELETE') {
+        if (!manager) return json({ error: 'forbidden' }, 403);
+        const id = parseInt(path.slice('/api/pos/attendance/'.length), 10) || 0;
+        await env.POS_DB.prepare('DELETE FROM attendance WHERE id = ?').bind(id).run();
+        return json({ ok: true });
+    }
+
+    // ---- المرتبات (مدير فقط) ----
+    if (path === '/api/pos/pay/rate' && request.method === 'POST') {
+        if (!manager) return json({ error: 'forbidden' }, 403);
+        let body;
+        try { body = await request.json(); } catch { return json({ error: 'bad_json' }, 400); }
+        const user = clean(body.user, 40);
+        const kind = body.kind === 'day' ? 'day' : 'month';
+        const rate = Math.round(Math.max(0, Math.min(1e7, Number(body.rate) || 0)) * 100) / 100;
+        if (!user) return json({ error: 'bad_fields' }, 400);
+        await env.POS_DB.prepare('INSERT INTO pay_rates (user, kind, rate) VALUES (?, ?, ?) ON CONFLICT(user) DO UPDATE SET kind = excluded.kind, rate = excluded.rate').bind(user, kind, rate).run();
+        return json({ ok: true });
+    }
+    if (path === '/api/pos/pay/advance' && request.method === 'POST') {
+        if (!manager) return json({ error: 'forbidden' }, 403);
+        let body;
+        try { body = await request.json(); } catch { return json({ error: 'bad_json' }, 400); }
+        const user = clean(body.user, 40);
+        const amount = Math.round(Math.max(0, Math.min(1e7, Number(body.amount) || 0)) * 100) / 100;
+        if (!user || amount <= 0) return json({ error: 'bad_fields' }, 400);
+        const day = /^\d{4}-\d{2}-\d{2}$/.test(String(body.day || '')) ? body.day : cairoDay();
+        const r = await env.POS_DB.prepare('INSERT INTO pay_advances (ts, day, user, amount, note, staff) VALUES (?, ?, ?, ?, ?, ?)').bind(new Date().toISOString(), day, user, amount, clean(body.note, 200), staff.user).run();
+        return json({ ok: true, id: r.meta.last_row_id });
+    }
+    if (path.startsWith('/api/pos/pay/advance/') && request.method === 'DELETE') {
+        if (!manager) return json({ error: 'forbidden' }, 403);
+        const id = parseInt(path.slice('/api/pos/pay/advance/'.length), 10) || 0;
+        await env.POS_DB.prepare('DELETE FROM pay_advances WHERE id = ?').bind(id).run();
+        return json({ ok: true });
+    }
+    if (path === '/api/pos/payroll' && request.method === 'GET') {
+        if (!manager) return json({ error: 'forbidden' }, 403);
+        const month = clean(new URL(request.url).searchParams.get('month'), 7) || cairoDay().slice(0, 7);
+        return json(await payrollFor(env, month));
+    }
+    if (path === '/api/pos/payroll/pay' && request.method === 'POST') {
+        if (!manager) return json({ error: 'forbidden' }, 403);
+        let body;
+        try { body = await request.json(); } catch { return json({ error: 'bad_json' }, 400); }
+        const user = clean(body.user, 40), month = clean(body.month, 7);
+        if (!user || !/^\d{4}-\d{2}$/.test(month)) return json({ error: 'bad_fields' }, 400);
+        const pr = await payrollFor(env, month);
+        const row = pr.rows.find((x) => x.user === user);
+        if (!row) return json({ error: 'unknown_user' }, 400);
+        const amount = Math.round(Math.max(0, Math.min(row.due, Number(body.amount) || row.due)) * 100) / 100;
+        if (amount <= 0) return json({ error: 'nothing_due' }, 400);
+        const day = cairoDay(), ts = new Date().toISOString();
+        await env.POS_DB.batch([
+            env.POS_DB.prepare('INSERT INTO pay_runs (ts, day, user, month, amount, staff) VALUES (?, ?, ?, ?, ?, ?)').bind(ts, day, user, month, amount, staff.user),
+            env.POS_DB.prepare('INSERT INTO expenses (ts, day, title, amount, cat, staff, note) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(ts, day, 'مرتب ' + user + ' - ' + month, amount, 'مرتبات', staff.user, 'payroll'),
+        ]);
+        return json({ ok: true, paid: amount });
+    }
+
     // ---- الباركود: المدير بيربط باركود بصنف ----
     if (path === '/api/pos/barcode' && request.method === 'POST') {
         if (!manager) return json({ error: 'forbidden' }, 403);
@@ -1066,8 +1202,21 @@ async function createInvoiceCore(env, staffUser, body) {
         lines.push({ code: p.code, name: p.name, price: p.price, qty, discount: Math.round(disc * 100) / 100, lineTotal, cost: costMap.get(p.code) || 0 });
     }
     const subtotal = Math.round(lines.reduce((s, l) => s + l.lineTotal, 0) * 100) / 100;
-    const invDisc = Math.max(0, Math.min(subtotal, Number(body.discount) || 0));
+    let invDisc = Math.max(0, Math.min(subtotal, Number(body.discount) || 0));
+    // نقاط الولاء: استبدال نقاط بخصم
+    const loy = await loyaltySettings(env);
+    let redeem = Math.max(0, parseInt(body.redeemPoints, 10) || 0);
+    if (redeem > 0) {
+        if (!loy.enabled) return { error: 'loyalty_off', status: 400 };
+        if (!customerId) return { error: 'customer_required', status: 400 };
+        const bal = await customerPoints(env, customerId);
+        if (redeem > bal) return { error: 'not_enough_points', status: 400, balance: bal };
+        const maxPts = Math.floor((subtotal - invDisc) / loy.pointValue + 1e-9);
+        if (redeem > maxPts) return { error: 'too_many_points', status: 400, max: maxPts };
+        invDisc = Math.round((invDisc + redeem * loy.pointValue) * 100) / 100;
+    }
     const total = Math.round((subtotal - invDisc) * 100) / 100;
+    const earned = loy.enabled && customerId ? Math.floor(total / loy.earnEvery + 1e-9) : 0;
 
     // إنقاص المخزون بشكل ذرّي: أي صنف كميته مش كفاية يوقف العملية كلها
     const stmts = [];
@@ -1090,7 +1239,59 @@ async function createInvoiceCore(env, staffUser, body) {
         itemStmts.push(env.POS_DB.prepare("INSERT INTO ledger (customer_id, ts, day, kind, amount, invoice_id, staff, note) VALUES (?, ?, ?, 'charge', ?, ?, ?, '')")
             .bind(customerId, ts, day, total, invoiceId, staffUser));
     }
+    if (customerId && redeem > 0) itemStmts.push(env.POS_DB.prepare("INSERT INTO points_log (customer_id, ts, day, delta, kind, invoice_id, note) VALUES (?, ?, ?, ?, 'redeem', ?, ?)").bind(customerId, ts, day, -redeem, invoiceId, 'استبدال نقاط في ' + num));
+    if (customerId && earned > 0) itemStmts.push(env.POS_DB.prepare("INSERT INTO points_log (customer_id, ts, day, delta, kind, invoice_id, note) VALUES (?, ?, ?, ?, 'earn', ?, ?)").bind(customerId, ts, day, earned, invoiceId, 'مكتسبة من ' + num));
     await env.POS_DB.batch(itemStmts);
     await syncStockFlags(env);
-    return { ok: true, id: invoiceId, num, ts, total };
+    return { ok: true, id: invoiceId, num, ts, total, discount: Math.round(invDisc * 100) / 100, pointsEarned: earned, pointsRedeemed: redeem, pointsBalance: customerId ? await customerPoints(env, customerId) : 0 };
+}
+
+// ---------- نقاط الولاء + الحضور + المرتبات: دوال مساعدة ----------
+async function loyaltySettings(env) {
+    const { results } = await env.POS_DB.prepare("SELECT k, v FROM settings WHERE k LIKE 'loyalty_%'").all();
+    const m = new Map((results || []).map((r) => [r.k, r.v]));
+    return {
+        earnEvery: Number(m.get('loyalty_earn_every')) || 10,   // كل كام جنيه = نقطة
+        pointValue: Number(m.get('loyalty_point_value')) || 0.5, // قيمة النقطة بالجنيه
+        enabled: m.get('loyalty_enabled') !== '0',
+    };
+}
+async function customerPoints(env, id) {
+    const r = await env.POS_DB.prepare('SELECT COALESCE(SUM(delta), 0) AS p FROM points_log WHERE customer_id = ?').bind(id).first();
+    return r?.p ?? 0;
+}
+// HH:MM بتوقيت القاهرة -> ISO UTC (القاهرة +2 شتاءً و+3 صيفاً: بنحسب الفرق الفعلي من النظام)
+function cairoToIso(day, hhmm) {
+    const [h, m] = String(hhmm).split(':').map((x) => parseInt(x, 10));
+    if (!(h >= 0 && h < 24 && m >= 0 && m < 60)) return '';
+    for (const off of [2, 3]) {
+        const d = new Date(Date.UTC(+day.slice(0, 4), +day.slice(5, 7) - 1, +day.slice(8, 10), h - off, m));
+        const f = new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Cairo', hour: '2-digit', minute: '2-digit', hour12: false }).format(d);
+        if (f === String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0')) return d.toISOString();
+    }
+    return '';
+}
+async function payrollFor(env, month) {
+    const from = month + '-01', to = month + '-31';
+    const q = async (sql, ...a) => (await env.POS_DB.prepare(sql).bind(...a).all()).results || [];
+    const rates = await q('SELECT user, kind, rate FROM pay_rates');
+    const att = await q('SELECT user, day, check_in, check_out FROM attendance WHERE day >= ? AND day <= ?', from, to);
+    const adv = await q('SELECT id, user, day, amount, note FROM pay_advances WHERE day >= ? AND day <= ? ORDER BY id DESC', from, to);
+    const runs = await q('SELECT user, SUM(amount) AS paid FROM pay_runs WHERE month = ? GROUP BY user', month);
+    const users = new Set([...rates.map((r) => r.user), ...att.map((a) => a.user), ...adv.map((a) => a.user)]);
+    const rows = [...users].sort().map((user) => {
+        const rt = rates.find((r) => r.user === user);
+        const mine = att.filter((a) => a.user === user);
+        const days = new Set(mine.map((a) => a.day)).size;
+        let ms = 0;
+        for (const a of mine) if (a.check_in && a.check_out) ms += Math.max(0, Date.parse(a.check_out) - Date.parse(a.check_in));
+        const hours = Math.round((ms / 3600000) * 10) / 10;
+        const kind = rt?.kind || 'month', rate = rt?.rate || 0;
+        const earned = Math.round((kind === 'day' ? rate * days : rate) * 100) / 100;
+        const advances = Math.round(adv.filter((a) => a.user === user).reduce((s, a) => s + a.amount, 0) * 100) / 100;
+        const paid = Math.round((runs.find((r) => r.user === user)?.paid || 0) * 100) / 100;
+        const due = Math.max(0, Math.round((earned - advances - paid) * 100) / 100);
+        return { user, kind, rate, hasRate: !!rt, days, hours, earned, advances, paid, due };
+    });
+    return { month, rows, advances: adv };
 }

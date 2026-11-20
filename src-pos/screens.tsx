@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api, cairoToday, fmt, fmtTime, paymentLabel, Customer, Expense, Invoice, LedgerEntry, Product, Quote, Report, Role, Staff } from './lib';
 import ScannerModal from './ScannerModal';
 import { ExportCard, ProfitView } from './ReportsExtra';
+import { LoyaltySettingsCard, PointsSection, Loyalty } from './LoyaltyUI';
 
 // ---------- فواتير ----------
 export function InvoicesScreen({ staff, openInvoice, openQuote, notify }: { staff: Staff; openInvoice: (id: number) => void; openQuote: (id: number) => void; notify: (m: string, b?: boolean) => void }) {
@@ -343,7 +344,7 @@ export function CustomersScreen({ staff, openInvoice, notify }: { staff: Staff; 
     const [name, setName] = useState('');
     const [phone, setPhone] = useState('');
     const [busy, setBusy] = useState(false);
-    const [detail, setDetail] = useState<{ customer: Customer; ledger: LedgerEntry[]; balance: number; invoices: any[] } | null>(null);
+    const [detail, setDetail] = useState<{ customer: Customer; ledger: LedgerEntry[]; balance: number; invoices: any[]; points?: number; pointsLog?: any[]; loyalty?: Loyalty } | null>(null);
     const [payAmt, setPayAmt] = useState('');
     const [payMethod, setPayMethod] = useState<'cash' | 'vcash'>('cash');
     const [editMode, setEditMode] = useState(false);
@@ -425,6 +426,7 @@ export function CustomersScreen({ staff, openInvoice, notify }: { staff: Staff; 
                     <div className="close-line"><span>إجمالي المديونيات القائمة</span><b>{fmt(totalDebt)} ج</b></div>
                 </div>
             ) : null}
+            {manager ? <LoyaltySettingsCard notify={notify} /> : null}
             <button className="btn btn-navy btn-block" style={{ marginBottom: 12 }} onClick={() => setAddOpen(true)}>➕ إضافة عميل</button>
             {loading ? <div className="empty">جاري التحميل…</div> : filtered.length === 0 ? <div className="empty">{list.length === 0 ? 'مفيش عملاء لسه — ضيف أول عميل' : 'مفيش نتايج للبحث'}</div> : filtered.map((c) => (
                 <button key={c.id} className="inv-row" style={{ width: '100%', textAlign: 'start' }} onClick={() => openDetail(c.id)}>
@@ -432,7 +434,10 @@ export function CustomersScreen({ staff, openInvoice, notify }: { staff: Staff; 
                         <div className="n">{c.name}</div>
                         <div className="m">{c.phone || 'بدون تليفون'}</div>
                     </div>
-                    {(c.balance || 0) > 0 ? <span className="badge vcash" style={{ fontSize: 13 }}>عليه {fmt(c.balance!)} ج</span> : <span className="badge cash">صفر</span>}
+                    <span style={{ marginInlineStart: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
+                        {(c.points || 0) > 0 ? <span className="badge" style={{ background: '#fff3d6', color: 'var(--amber-d)', fontSize: 12 }}>⭐ {c.points}</span> : null}
+                        {(c.balance || 0) > 0 ? <span className="badge vcash" style={{ fontSize: 13 }}>عليه {fmt(c.balance!)} ج</span> : <span className="badge cash">صفر</span>}
+                    </span>
                 </button>
             ))}
 
@@ -484,6 +489,10 @@ export function CustomersScreen({ staff, openInvoice, notify }: { staff: Staff; 
                                     ) : null}
                                 </>
                             )}
+
+                            {!editMode && detail.loyalty && detail.loyalty.enabled ? (
+                                <PointsSection customerId={detail.customer.id} points={detail.points || 0} log={detail.pointsLog || []} loyalty={detail.loyalty} manager={manager} notify={notify} onChanged={() => refreshDetail(detail.customer.id)} />
+                            ) : null}
 
                             {detail.balance > 0 && !editMode ? (
                                 <div className="close-card">

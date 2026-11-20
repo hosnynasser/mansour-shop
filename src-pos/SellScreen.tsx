@@ -1,6 +1,7 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, fmt, CartLine, Customer, Invoice, Product } from './lib';
 import ScannerModal from './ScannerModal';
+import { Loyalty } from './LoyaltyUI';
 
 export default function SellScreen({
     products, onDone, onNeedRefresh, notify,
@@ -23,6 +24,9 @@ export default function SellScreen({
     const [custName, setCustName] = useState('');
     const [custPhone, setCustPhone] = useState('');
     const [busy, setBusy] = useState(false);
+    const [loy, setLoy] = useState<Loyalty | null>(null);
+    const [ptsPick, setPtsPick] = useState(false);
+    const [redeem, setRedeem] = useState('');
     const searchRef = useRef<HTMLInputElement>(null);
 
     const filtered = useMemo(() => {
@@ -45,8 +49,23 @@ export default function SellScreen({
         setCart((c) => c.map((l) => (l.code === code ? { ...l, discount: Math.max(0, Number(v) || 0) } : l)));
 
     const subtotal = cart.reduce((s, l) => s + Math.max(0, l.price * l.qty - l.discount), 0);
-    const disc = Math.max(0, Math.min(subtotal, Number(invDisc) || 0));
+    const disc0 = Math.max(0, Math.min(subtotal, Number(invDisc) || 0));
+    const selCust = (customers || []).find((c) => c.id === custId);
+    const custPts = selCust?.points || 0;
+    const pv = loy?.pointValue || 0.5;
+    const maxPts = loy && loy.enabled && custId ? Math.max(0, Math.min(custPts, Math.floor((subtotal - disc0) / pv + 1e-9))) : 0;
+    const redeemPts = Math.max(0, Math.min(maxPts, parseInt(redeem, 10) || 0));
+    const disc = disc0 + redeemPts * pv;
     const total = subtotal - disc;
+    const earnPreview = loy && loy.enabled && custId ? Math.floor(total / loy.earnEvery + 1e-9) : 0;
+
+    useEffect(() => {
+        if (!cartOpen || loy) return;
+        (async () => {
+            try { const r = await api('/api/pos/loyalty'); setLoy(r.settings); } catch {}
+            if (customers === null) { try { const r = await api('/api/pos/customers'); setCustomers(r.customers || []); } catch {} }
+        })();
+    }, [cartOpen]);
     const count = cart.reduce((s, l) => s + l.qty, 0);
 
     const pickDebt = async () => {
@@ -95,25 +114,29 @@ export default function SellScreen({
         try {
             const r = await api('/api/pos/invoices', 'POST', {
                 items: cart.map((l) => ({ code: l.code, qty: l.qty, discount: l.discount })),
-                payment, discount: disc, customerName: custName.trim(), customerPhone: custPhone.trim(),
-                customerId: custId || undefined,
+                payment, discount: disc0, customerName: custName.trim(), customerPhone: custPhone.trim(),
+                customerId: custId || undefined, redeemPoints: redeemPts || undefined,
             });
             const inv: Invoice = {
                 id: r.id, num: r.num, ts: r.ts, staff: '', payment,
-                subtotal: Math.round(subtotal * 100) / 100, discount: Math.round(disc * 100) / 100, total: r.total,
-                status: 'completed', customer_name: custName.trim(), customer_phone: custPhone.trim(),
+                subtotal: Math.round(subtotal * 100) / 100, discount: r.discount ?? Math.round(disc * 100) / 100, total: r.total,
+                status: 'completed', customer_name: custName.trim() || selCust?.name || '', customer_phone: custPhone.trim() || selCust?.phone || '',
+                pointsEarned: r.pointsEarned, pointsBalance: r.pointsBalance,
             };
             const items = cart.map((l) => ({
                 code: l.code, name: l.name, price: l.price, qty: l.qty,
                 discount: Math.round(l.discount * 100) / 100, line_total: Math.max(0, l.price * l.qty - l.discount),
             }));
-            setCart([]); setCartOpen(false); setInvDisc(''); setCustName(''); setCustPhone(''); setCustId(0); setCustQ('');
+            setCart([]); setCartOpen(false); setInvDisc(''); setCustName(''); setCustPhone(''); setCustId(0); setCustQ(''); setRedeem(''); setPtsPick(false);
+            setCustomers(null); setLoy(null);
             onDone(inv, items);
             onNeedRefresh();
         } catch (e: any) {
             if (e?.data?.error === 'insufficient_stock') {
                 notify('الكمية المطلوبة أكبر من المخزون المتاح للصنف ' + e.data.code, true);
                 onNeedRefresh();
+            } else if (e?.data?.error === 'not_enough_points' || e?.data?.error === 'too_many_points') {
+                notify('النقاط المطلوبة أكتر من المتاح، عدّل العدد', true);
             } else {
                 notify('حصلت مشكلة في تسجيل البيع، جرب تاني', true);
             }
@@ -192,6 +215,44 @@ export default function SellScreen({
                                     <label>خصم على الفاتورة كلها (جنيه)</label>
                                     <input inputMode="decimal" value={invDisc} onChange={(e) => setInvDisc(e.target.value)} placeholder="0" />
                                 </div>
+                                {loy && loy.enabled ? (
+                                    <div className="field">
+                                        {!custId ? (
+                                            <>
+                                                <button className="btn btn-ghost btn-block" onClick={() => setPtsPick(!ptsPick)}>⭐ عميل بنقاط ولاء (اختياري)</button>
+                                                {ptsPick ? (
+                                                    <div style={{ marginTop: 8, border: '1.5px dashed var(--amber)', borderRadius: 12, padding: 10 }}>
+                                                        <input placeholder="ابحث عن عميل…" value={custQ} onChange={(e) => setCustQ(e.target.value)} style={{ width: '100%', border: '1.5px solid var(--line)', borderRadius: 10, padding: '9px 12px', marginBottom: 6 }} />
+                                                        <div style={{ maxHeight: 150, overflowY: 'auto' }}>
+                                                            {(customers || []).filter((c) => !custQ.trim() || c.name.toLowerCase().includes(custQ.trim().toLowerCase()) || c.phone.includes(custQ.trim())).slice(0, 20).map((c) => (
+                                                                <button key={c.id} onClick={() => { setCustId(c.id); setPtsPick(false); setRedeem(''); }} style={{ display: 'flex', width: '100%', justifyContent: 'space-between', padding: '9px 10px', marginBottom: 4, borderRadius: 10, border: '1.5px solid var(--line)', background: '#fff', fontSize: 14 }}>
+                                                                    <span><b>{c.name}</b>{c.phone ? ' · ' + c.phone : ''}</span>
+                                                                    <span style={{ fontSize: 12, color: 'var(--amber-d)', fontWeight: 700 }}>⭐ {c.points || 0}</span>
+                                                                </button>
+                                                            ))}
+                                                            {customers !== null && customers.length === 0 ? <div style={{ fontSize: 13, color: 'var(--muted)', padding: 6 }}>مفيش عملاء — ضيف عميل من شاشة العملاء</div> : null}
+                                                        </div>
+                                                    </div>
+                                                ) : null}
+                                            </>
+                                        ) : (
+                                            <div style={{ border: '1.5px solid var(--amber)', background: '#fff8ea', borderRadius: 12, padding: 10 }}>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                                    <b style={{ flex: 1 }}>{selCust?.name} · ⭐ {custPts} نقطة (= {fmt(custPts * pv)} ج)</b>
+                                                    <button className="btn btn-ghost btn-sm" onClick={() => { setCustId(0); setRedeem(''); }}>إلغاء</button>
+                                                </div>
+                                                {maxPts > 0 ? (
+                                                    <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                                                        <input inputMode="numeric" placeholder={`نقاط تستخدمها (لحد ${maxPts})`} value={redeem} onChange={(e) => setRedeem(e.target.value)} style={{ flex: 1, border: '1.5px solid var(--line)', borderRadius: 10, padding: '9px 12px' }} />
+                                                        <button className="btn btn-navy btn-sm" onClick={() => setRedeem(String(maxPts))}>الكل</button>
+                                                    </div>
+                                                ) : <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 6 }}>مفيش نقاط متاحة للاستخدام في الفاتورة دي</div>}
+                                                {redeemPts > 0 ? <div style={{ fontSize: 13, marginTop: 6, fontWeight: 700, color: '#0f7a44' }}>خصم النقاط: -{fmt(redeemPts * pv)} ج</div> : null}
+                                                {earnPreview > 0 ? <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>هيكسب {earnPreview} نقطة من الفاتورة دي</div> : null}
+                                            </div>
+                                        )}
+                                    </div>
+                                ) : null}
                                 <div className="field">
                                     <label>طريقة الدفع</label>
                                     <div className="pay-toggle">

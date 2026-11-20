@@ -136,3 +136,19 @@ CREATE TABLE IF NOT EXISTS cheques (
     staff TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_cheques_due ON cheques(due_day);
+
+-- stage 4 batch 3
+CREATE TABLE IF NOT EXISTS settings (k TEXT PRIMARY KEY, v TEXT);
+CREATE TABLE IF NOT EXISTS points_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, customer_id INTEGER NOT NULL, ts TEXT, day TEXT,
+    delta INTEGER NOT NULL, kind TEXT, invoice_id INTEGER, note TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_points_customer ON points_log(customer_id);
+CREATE INDEX IF NOT EXISTS idx_points_invoice ON points_log(invoice_id);
+CREATE TABLE IF NOT EXISTS attendance (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT, day TEXT, check_in TEXT, check_out TEXT DEFAULT '', manual INTEGER DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_att_day ON attendance(day);
+CREATE TABLE IF NOT EXISTS pay_rates (user TEXT PRIMARY KEY, kind TEXT DEFAULT 'month', rate REAL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS pay_advances (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, day TEXT, user TEXT, amount REAL, note TEXT DEFAULT '', staff TEXT);
+CREATE TABLE IF NOT EXISTS pay_runs (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, day TEXT, user TEXT, month TEXT, amount REAL, staff TEXT);
