@@ -40,7 +40,7 @@ const shop = {
 
 // ===== المنتجات (أسماء وأسعار وصور وأكواد مؤقتة لحين تجهيز الأصلية) =====
 type Cat = 'كهرباء' | 'أدوات صحية';
-type Product = { name: string; desc: string; price: number; code: string; cat: Cat; img: any; alt: string; stock?: boolean; imgUrl?: string };
+type Product = { name: string; desc: string; price: number; code: string; cat: Cat; img: any; alt: string; stock?: boolean; imgUrl?: string; images?: string[]; video?: string };
 
 const products: Product[] = [
     { name: 'لمبة ليد 12 وات', desc: 'إضاءة بيضاء، قاعدة E27', price: 90, code: 'EL-101', cat: 'كهرباء', img: ledBulb, alt: 'لمبة ليد بيضاء' },
@@ -63,7 +63,7 @@ const products: Product[] = [
     { name: 'شريط تفلون', desc: 'لعزل السنون', price: 15, code: 'PL-209', cat: 'أدوات صحية', img: teflon, alt: 'لفة شريط تفلون' },
 ];
 
-const PAGE_SIZE = 8;
+const PAGE_SIZE = 14;
 
 // ===== الباك إند (Cloudflare Worker) — يتحط رابطه بعد النشر =====
 const API_BASE = 'https://mansour-shop-api.hosnynasser843.workers.dev';
@@ -78,12 +78,38 @@ async function apiFetch(path: string, opts: RequestInit = {}, adminCode?: string
     return j;
 }
 
+const mediaUrl = (id: string) => API_BASE + '/api/media/' + id;
+
 function fromApi(p: any): Product {
     const embedded = products.find((e) => e.code === p.code);
+    const images: string[] = Array.isArray(p.images) ? p.images : [];
     return {
         name: p.name, desc: p.desc ?? '', price: p.price, code: p.code, cat: p.cat,
-        img: p.imgUrl || embedded?.img || logo, alt: p.name,
+        img: images.length ? mediaUrl(images[0]) : (p.imgUrl || embedded?.img || logo), alt: p.name,
         stock: p.stock !== false, imgUrl: p.imgUrl || undefined,
+        images, video: typeof p.video === 'string' ? p.video : '',
+    };
+}
+
+// ===== بيانات التواصل (بتتعدل من لوحة التحكم وبتتحمل من الباك إند) =====
+type SiteInfo = { phone: string; phone2?: string; whatsapp?: string; address: string; hours: string };
+const defaultSite: SiteInfo = { phone: shop.phone, address: shop.address, hours: shop.hours };
+const SiteCtx = createContext<SiteInfo>(defaultSite);
+const useSite = () => useContext(SiteCtx);
+
+const digitsOnly = (s: string) => s.replace(/[^0-9]/g, '');
+const egyptIntl = (s: string) => { const d = digitsOnly(s); return d.startsWith('20') ? d : d.startsWith('0') ? '2' + d : d; };
+
+function useSiteLinks() {
+    const site = useSite();
+    const intl = egyptIntl(site.phone);
+    const waNum = egyptIntl(site.whatsapp || site.phone);
+    const q = encodeURIComponent(site.address);
+    return {
+        phoneHref: 'tel:+' + intl,
+        whatsappHref: 'https://wa.me/' + waNum + '?text=' + encodeURIComponent('السلام عليكم، عايز استفسر عن منتج'),
+        mapsHref: 'https://www.google.com/maps/search/?api=1&query=' + q,
+        mapsEmbed: 'https://www.google.com/maps?q=' + q + '&output=embed',
     };
 }
 
@@ -246,32 +272,55 @@ function Home() {
             <p className="rev-note">نماذج آراء مؤقتة لحين إضافة آراء العملاء الحقيقية.</p>
         </section>
 
-        <section className="section steps-sec">
-            <h2>ازاي تطلب؟</h2>
-            <div className="steps">
-                <div className="step"><div className="num">١</div><h3>دوّر في الكتالوج</h3><p>ابحث بالاسم أو الكود أو القسم.</p></div>
-                <div className="step"><div className="num">٢</div><h3>اجمع في السلة</h3><p>ضيف المنتجات للسلة وابعت طلبك كله رسالة واتساب واحدة.</p></div>
-                <div className="step"><div className="num">٣</div><h3>زورنا في المحل</h3><p>حلوان، أطلس، مدخل مايو، أمام مسجد الروضة.</p></div>
-            </div>
-        </section>
-
-        <section className="contact" id="mn-contact">
-            <div className="contact-card">
-                <h2>زورنا أو تواصل معانا</h2>
-                <p>{shop.address}</p>
-                <p>{shop.hours}</p>
-                <div className="contact-phone">{shop.phone}</div>
-                <div className="contact-actions">
-                    <a className="btn btn-light" href={shop.phoneHref}><Ic id="i-phone" />اتصل بالمحل</a>
-                    <a className="btn btn-wa" href={shop.whatsappHref} target="_blank" rel="noreferrer"><Ic id="i-wa" />واتساب</a>
-                    <a className="btn btn-line" href={shop.mapsHref} target="_blank" rel="noreferrer"><Ic id="i-pin" />افتح الخريطة</a>
-                </div>
-            </div>
-            <div className="map-frame">
-                <iframe title="موقع محل منصور على الخريطة" loading="lazy" referrerPolicy="no-referrer-when-downgrade" src={shop.mapsEmbed}></iframe>
-            </div>
-        </section>
+        <ContactSection />
     </>;
+}
+
+function CartPhoneLink() {
+    const site = useSite();
+    const links = useSiteLinks();
+    return <a href={links.phoneHref}>{site.phone}</a>;
+}
+
+function HeaderCallLink({ className, children, ...rest }: any) {
+    const links = useSiteLinks();
+    return <a href={links.phoneHref} className={className} {...rest}>{children}</a>;
+}
+
+function FooterPhones() {
+    const site = useSite();
+    const links = useSiteLinks();
+    return <>
+        <a className="footer-phone" href={links.phoneHref}>{site.phone}</a>
+        {site.phone2 && <a className="footer-phone" href={'tel:+' + egyptIntl(site.phone2)}>{site.phone2}</a>}
+    </>;
+}
+
+function WaFloat() {
+    const links = useSiteLinks();
+    return <a className="wa-float" href={links.whatsappHref} target="_blank" rel="noreferrer" aria-label="تواصل معنا على واتساب"><Ic id="i-wa" style={{ fontSize: 30 }} /></a>;
+}
+
+function ContactSection() {
+    const site = useSite();
+    const links = useSiteLinks();
+    return <section className="contact" id="mn-contact">
+        <div className="contact-card">
+            <h2>زورنا أو تواصل معانا</h2>
+            <p>{site.address}</p>
+            <p>{site.hours}</p>
+            <div className="contact-phone">{site.phone}</div>
+            {site.phone2 && <div className="contact-phone">{site.phone2}</div>}
+            <div className="contact-actions">
+                <a className="btn btn-light" href={links.phoneHref}><Ic id="i-phone" />اتصل بالمحل</a>
+                <a className="btn btn-wa" href={links.whatsappHref} target="_blank" rel="noreferrer"><Ic id="i-wa" />واتساب</a>
+                <a className="btn btn-line" href={links.mapsHref} target="_blank" rel="noreferrer"><Ic id="i-pin" />افتح الخريطة</a>
+            </div>
+        </div>
+        <div className="map-frame">
+            <iframe title="موقع محل منصور على الخريطة" loading="lazy" referrerPolicy="no-referrer-when-downgrade" src={links.mapsEmbed}></iframe>
+        </div>
+    </section>;
 }
 
 function scrollToContact() {
@@ -287,12 +336,15 @@ function scrollTopSoon() {
 function ProductCard({ p, onOpen }: { p: Product; onOpen: (p: Product) => void }) {
     const { add } = useCart();
     const [qty, setQtyLocal] = useState(1);
-    return <article className="product-card">
+    const hasRealImg = !!(p.images && p.images.length) || !!p.imgUrl;
+    const out = p.stock === false;
+    return <article className={'product-card' + (out ? ' out-of-stock' : '')}>
         <button type="button" className="product-main" onClick={() => onOpen(p)} aria-label={'تفاصيل ' + p.name}>
             <div className={'product-art ' + (p.cat === 'كهرباء' ? 'cat-el' : 'cat-pl')}>
                 <img src={p.img} alt={p.alt} loading="lazy" />
                 <small className="product-category">{p.cat}</small>
-                <small className="product-temp">صورة مؤقتة</small>
+                {!hasRealImg && <small className="product-temp">صورة مؤقتة</small>}
+                {out && <span className="stock-badge out">غير متوفر</span>}
             </div>
             <div className="product-info"><h3>{p.name}</h3><p>{p.desc} · كود {p.code}</p></div>
         </button>
@@ -306,7 +358,9 @@ function ProductCard({ p, onOpen }: { p: Product; onOpen: (p: Product) => void }
                 </span>
             </div>
             <div className="pb-row">
-                <button type="button" className="ask-btn" onClick={() => { add(p.code, qty); setQtyLocal(1); }} aria-label={'أضف ' + p.name + ' للسلة'}><Ic id="i-cart" />أضف للسلة</button>
+                {out
+                    ? <span className="ask-btn out-note">غير متوفر حاليا</span>
+                    : <button type="button" className="ask-btn" onClick={() => { add(p.code, qty); setQtyLocal(1); }} aria-label={'أضف ' + p.name + ' للسلة'}><Ic id="i-cart" />أضف للسلة</button>}
             </div>
         </div>
     </article>;
@@ -315,15 +369,28 @@ function ProductCard({ p, onOpen }: { p: Product; onOpen: (p: Product) => void }
 // ===== صفحة تفاصيل المنتج =====
 function ProductPage({ p, onClose }: { p: Product | null; onClose: () => void }) {
     const { add } = useCart();
+    const [imgIdx, setImgIdx] = useState(0);
     if (!p) return null;
+    const gallery = (p.images && p.images.length ? p.images.map(mediaUrl) : [p.img]);
+    const cur = gallery[Math.min(imgIdx, gallery.length - 1)];
+    const out = p.stock === false;
     return <div className="sheet-page" role="dialog" aria-label={p.name}>
         <div className="sheet-topbar">
             <button type="button" className="sheet-back" onClick={onClose} aria-label="رجوع">→</button>
             <b>تفاصيل المنتج</b>
         </div>
         <div className={'pd-hero ' + (p.cat === 'كهرباء' ? 'cat-el' : 'cat-pl')}>
-            <img src={p.img} alt={p.alt} />
+            <img src={cur} alt={p.alt} />
+            {out && <span className="stock-badge out">غير متوفر</span>}
         </div>
+        {gallery.length > 1 && <div className="pd-thumbs">
+            {gallery.map((g, i) => <button type="button" key={i} className={i === Math.min(imgIdx, gallery.length - 1) ? 'pd-thumb sel' : 'pd-thumb'} onClick={() => setImgIdx(i)} aria-label={'صورة ' + (i + 1)}>
+                <img src={g} alt="" />
+            </button>)}
+        </div>}
+        {p.video && <div className="pd-video">
+            <video controls preload="metadata" playsInline src={mediaUrl(p.video)} />
+        </div>}
         <div className="pd-body">
             <span className="dlg-cat">{p.cat}</span>
             <h2>{p.name}</h2>
@@ -333,9 +400,11 @@ function ProductPage({ p, onClose }: { p: Product | null; onClose: () => void })
                 <span className="pd-price">{num(p.price)} <small>جنيه</small></span>
             </div>
             <div className="pd-actions">
-                <button type="button" className="btn btn-primary" onClick={() => { add(p.code); onClose(); }}><Ic id="i-cart" />أضف للسلة</button>
+                {out
+                    ? <span className="btn out-note-lg">غير متوفر حاليا — اسأل المحل عن موعد التوفير</span>
+                    : <button type="button" className="btn btn-primary" onClick={() => { add(p.code); onClose(); }}><Ic id="i-cart" />أضف للسلة</button>}
             </div>
-            <span className="pd-temp">الصورة والسعر استرشاديان لحين إضافة بيانات المحل الفعلية</span>
+            {!(p.images && p.images.length) && !p.imgUrl && <span className="pd-temp">الصورة والسعر استرشاديان لحين إضافة بيانات المحل الفعلية</span>}
         </div>
     </div>;
 }
@@ -469,7 +538,7 @@ function CartPage({ onClose, cust, setCust }: { onClose: () => void; cust: Cust;
                     <h3>طلبك وصل المحل</h3>
                     <p className="order-done-id">رقم الطلب: <b dir="ltr">{done.id}</b></p>
                     <p className="order-done-total">الإجمالي: <b>{num(done.total)} جنيه</b></p>
-                    <p className="cart-note">المحل هيتواصل معاك على <b dir="ltr">{cust.phone.trim()}</b> لتأكيد الطلب والتوصيل.<br />لو عايز تعدل أو تلغي، اتصل على <a href={shop.phoneHref}>{shop.phone}</a> وقول رقم الطلب.</p>
+                    <p className="cart-note">المحل هيتواصل معاك على <b dir="ltr">{cust.phone.trim()}</b> لتأكيد الطلب والتوصيل.<br />لو عايز تعدل أو تلغي، اتصل على <CartPhoneLink /> وقول رقم الطلب.</p>
                     <button type="button" className="btn btn-amber" onClick={onClose}>متابعة التسوق</button>
                 </div>
             : items.length === 0
@@ -507,24 +576,61 @@ function CartPage({ onClose, cust, setCust }: { onClose: () => void; cust: Cust;
     </div>;
 }
 
-// ===== لوحة تحكم المدير (صفحة مخفية على #/admin) =====
-type ApiProduct = { name: string; desc?: string; price: number; code: string; cat: Cat; imgUrl?: string; stock?: boolean };
+// ===== لوحة تحكم المدير (صفحة مخفية) =====
+type ApiProduct = { name: string; desc?: string; price: number; code: string; cat: Cat; imgUrl?: string; stock?: boolean; images?: string[]; video?: string };
 type ApiOrder = { id: string; ts: string; status: 'new' | 'done'; customer: { name: string; phone: string; address: string }; lines: { code: string; name: string; price: number; qty: number }[]; total: number };
+
+// ضغط الصورة قبل الرفع: أقصى مقاس 1280 وجودة JPEG ~0.82
+function fileToJpegBase64(file: File, maxDim = 1280): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        const url = URL.createObjectURL(file);
+        img.onload = () => {
+            const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+            const w = Math.max(1, Math.round(img.width * scale));
+            const h = Math.max(1, Math.round(img.height * scale));
+            const c = document.createElement('canvas');
+            c.width = w; c.height = h;
+            c.getContext('2d')!.drawImage(img, 0, 0, w, h);
+            URL.revokeObjectURL(url);
+            const dataUrl = c.toDataURL('image/jpeg', 0.82);
+            resolve(dataUrl.split(',')[1]);
+        };
+        img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('bad_image')); };
+        img.src = url;
+    });
+}
+
+function fileToBase64Raw(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(String(r.result).split(',')[1]);
+        r.onerror = () => reject(new Error('read_failed'));
+        r.readAsDataURL(file);
+    });
+}
 
 const safeGetCode = () => { try { return sessionStorage.getItem('adminCode') || ''; } catch { return ''; } };
 const safeSetCode = (v: string) => { try { sessionStorage.setItem('adminCode', v); } catch { /* sandboxed preview */ } };
 const safeClearCode = () => { try { sessionStorage.removeItem('adminCode'); } catch { /* sandboxed preview */ } };
 
 function AdminPage({ onClose }: { onClose: () => void }) {
-    const [code, setCode] = useState(safeGetCode);
+    const [user, setUser] = useState('');
+    const [pass, setPass] = useState('');
+    const [cred, setCred] = useState(safeGetCode); // المخزن: إما الكود الرئيسي أو user:pass
     const [authed, setAuthed] = useState(() => !!safeGetCode());
-    const [tab, setTab] = useState<'orders' | 'products'>('orders');
+    const [tab, setTab] = useState<'orders' | 'products' | 'contact' | 'admins'>('orders');
     const [gateErr, setGateErr] = useState('');
     const [gateBusy, setGateBusy] = useState(false);
     const [orders, setOrders] = useState<ApiOrder[] | null>(null);
     const [prods, setProds] = useState<ApiProduct[] | null>(null);
     const [customProds, setCustomProds] = useState(false);
     const [msg, setMsg] = useState('');
+    const [prodQuery, setProdQuery] = useState('');
+    const [uploading, setUploading] = useState('');
+    const [siteForm, setSiteForm] = useState<SiteInfo | null>(null);
+    const [admins, setAdmins] = useState<{ user: string }[] | null>(null);
+    const [newAdmin, setNewAdmin] = useState({ user: '', pass: '' });
 
     const loadOrders = async (c: string) => {
         const r = await apiFetch('/api/admin/orders', {}, c);
@@ -533,31 +639,43 @@ function AdminPage({ onClose }: { onClose: () => void }) {
     const loadProducts = async (c: string) => {
         const r = await apiFetch('/api/admin/products', {}, c);
         setCustomProds(r.custom);
-        setProds(r.custom ? r.products : products.map((p) => ({ name: p.name, desc: p.desc, price: p.price, code: p.code, cat: p.cat, imgUrl: '', stock: true })));
+        setProds(r.custom ? r.products : products.map((p) => ({ name: p.name, desc: p.desc, price: p.price, code: p.code, cat: p.cat, imgUrl: '', stock: true, images: [], video: '' })));
+    };
+    const loadSite = async () => {
+        try {
+            const r = await apiFetch('/api/site');
+            if (r.site) { setSiteForm({ phone: r.site.phone || '', phone2: r.site.phone2 || '', whatsapp: r.site.whatsapp || '', address: r.site.address || '', hours: r.site.hours || '' }); return; }
+        } catch { /* no saved site yet */ }
+        setSiteForm({ ...defaultSite, phone2: '', whatsapp: '' });
+    };
+    const loadAdmins = async (c: string) => {
+        const r = await apiFetch('/api/admin/admins', {}, c);
+        setAdmins(r.admins);
     };
 
     useEffect(() => {
         if (!authed || !API_BASE) return;
-        Promise.all([loadOrders(code), loadProducts(code)]).catch(() => {
-            safeClearCode(); setAuthed(false); setGateErr('الكود غلط أو في مشكلة في الاتصال. جرب تاني.');
+        Promise.all([loadOrders(cred), loadProducts(cred), loadSite(), loadAdmins(cred)]).catch(() => {
+            safeClearCode(); setAuthed(false); setGateErr('بيانات الدخول غلط أو في مشكلة في الاتصال. جرب تاني.');
         });
     }, [authed]);
 
     const login = async () => {
-        if (!code.trim() || gateBusy) return;
+        if (!pass.trim() || gateBusy) return;
         setGateBusy(true); setGateErr('');
+        const c = user.trim() ? user.trim() + ':' + pass.trim() : pass.trim();
         try {
-            await apiFetch('/api/admin/orders', {}, code.trim());
-            safeSetCode(code.trim());
-            setCode(code.trim()); setAuthed(true);
+            await apiFetch('/api/admin/orders', {}, c);
+            safeSetCode(c);
+            setCred(c); setAuthed(true);
         } catch (e: any) {
-            setGateErr(e?.status === 401 ? 'الكود غلط.' : 'في مشكلة في الاتصال. جرب تاني.');
+            setGateErr(e?.status === 401 ? 'بيانات الدخول غلط.' : 'في مشكلة في الاتصال. جرب تاني.');
         }
         setGateBusy(false);
     };
 
     const setStatus = async (id: string, status: 'new' | 'done') => {
-        await apiFetch('/api/admin/orders/status', { method: 'POST', body: JSON.stringify({ id, status }) }, code);
+        await apiFetch('/api/admin/orders/status', { method: 'POST', body: JSON.stringify({ id, status }) }, cred);
         setOrders((os) => (os || []).map((o) => (o.id === id ? { ...o, status } : o)));
     };
 
@@ -565,12 +683,73 @@ function AdminPage({ onClose }: { onClose: () => void }) {
         if (!prods) return;
         setMsg('');
         try {
-            await apiFetch('/api/admin/products', { method: 'PUT', body: JSON.stringify({ products: prods }) }, code);
+            await apiFetch('/api/admin/products', { method: 'PUT', body: JSON.stringify({ products: prods }) }, cred);
             setCustomProds(true); setMsg('اتحفظت التعديلات وهتظهر على الموقع فورا.');
         } catch (e: any) {
             setMsg(e?.message === 'duplicate_code' ? 'في كود متكرر — كل منتج لازم يكون ليه كود مختلف.' : 'مشكلة في الحفظ: تأكد إن كل منتج ليه اسم وكود وسعر وقسم.');
         }
     };
+
+    const uploadImage = async (idx: number, file: File) => {
+        setUploading('img' + idx); setMsg('');
+        try {
+            const b64 = await fileToJpegBase64(file);
+            const r = await apiFetch('/api/admin/media', { method: 'POST', body: JSON.stringify({ data: b64, type: 'image/jpeg' }) }, cred);
+            setProds((ps) => (ps || []).map((x, j) => j === idx ? { ...x, images: [...(x.images || []), r.id].slice(0, 6) } : x));
+        } catch (e: any) {
+            setMsg(e?.message === 'too_big' ? 'الصورة كبيرة أوي حتى بعد الضغط. جرب صورة أصغر.' : 'مشكلة في رفع الصورة. جرب تاني.');
+        }
+        setUploading('');
+    };
+
+    const uploadVideo = async (idx: number, file: File) => {
+        if (file.size > 17 * 1024 * 1024) { setMsg('الفيديو كبير أوي — الحد الأقصى حوالي 17 ميجا.'); return; }
+        setUploading('vid' + idx); setMsg('');
+        try {
+            const b64 = await fileToBase64Raw(file);
+            const type = /^video\/(mp4|webm|quicktime)$/.test(file.type) ? file.type : 'video/mp4';
+            const r = await apiFetch('/api/admin/media', { method: 'POST', body: JSON.stringify({ data: b64, type }) }, cred);
+            setProds((ps) => (ps || []).map((x, j) => j === idx ? { ...x, video: r.id } : x));
+        } catch (e: any) {
+            setMsg(e?.message === 'too_big' ? 'الفيديو كبير أوي — جرب فيديو أقصر.' : 'مشكلة في رفع الفيديو. جرب تاني.');
+        }
+        setUploading('');
+    };
+
+    const saveSite = async () => {
+        if (!siteForm) return;
+        setMsg('');
+        try {
+            await apiFetch('/api/admin/site', { method: 'PUT', body: JSON.stringify({ site: siteForm }) }, cred);
+            setMsg('اتحفظت بيانات التواصل وهتظهر على الموقع فورا.');
+        } catch (e: any) {
+            setMsg(e?.message === 'missing_fields' ? 'رقم التليفون والعنوان مطلوبين.' : 'مشكلة في الحفظ. جرب تاني.');
+        }
+    };
+
+    const addAdmin = async () => {
+        setMsg('');
+        try {
+            await apiFetch('/api/admin/admins', { method: 'POST', body: JSON.stringify(newAdmin) }, cred);
+            setNewAdmin({ user: '', pass: '' }); setMsg('اتضاف المشرف بنجاح.'); loadAdmins(cred);
+        } catch (e: any) {
+            setMsg(e?.message === 'user_exists' ? 'اسم المستخدم ده موجود قبل كده.' : e?.message === 'bad_fields' ? 'اسم المستخدم 3 حروف على الأقل وكلمة السر 6 على الأقل.' : 'مشكلة في الإضافة. جرب تاني.');
+        }
+    };
+    const delAdmin = async (u: string) => {
+        setMsg('');
+        try {
+            await apiFetch('/api/admin/admins/delete', { method: 'POST', body: JSON.stringify({ user: u }) }, cred);
+            setMsg('اتحذف المشرف.'); loadAdmins(cred);
+        } catch (e: any) {
+            setMsg(e?.message === 'last_admin' ? 'مينفعش تمسح آخر مشرف.' : 'مشكلة في الحذف. جرب تاني.');
+        }
+    };
+
+    const prodGroups: { cat: Cat; items: { p: ApiProduct; i: number }[] }[] = (['كهرباء', 'أدوات صحية'] as Cat[]).map((cat) => ({
+        cat,
+        items: (prods || []).map((p, i) => ({ p, i })).filter(({ p }) => p.cat === cat && (!prodQuery.trim() || normalize(`${p.name} ${p.desc || ''} ${p.code}`).includes(normalize(prodQuery.trim())))),
+    }));
 
     return <div className="sheet-page" role="dialog" aria-label="لوحة تحكم المحل">
         <div className="sheet-topbar">
@@ -583,8 +762,11 @@ function AdminPage({ onClose }: { onClose: () => void }) {
     </div>
 
     : !authed ? <div className="admin-wrap" dir="rtl">
-        <label className="field">كود الدخول
-            <input type="password" value={code} placeholder="اكتب الكود" onChange={(e) => setCode(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && login()} />
+        <label className="field">اسم المستخدم (لو عندك حساب مشرف)
+            <input type="text" value={user} placeholder="اتركه فاضي لو بتدخل بالكود الرئيسي" onChange={(e) => setUser(e.target.value)} />
+        </label>
+        <label className="field">كلمة السر / الكود
+            <input type="password" value={pass} placeholder="اكتب كلمة السر أو الكود" onChange={(e) => setPass(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && login()} />
         </label>
         <button type="button" className="btn btn-amber" onClick={login} disabled={gateBusy}>{gateBusy ? 'جاري الدخول…' : 'دخول'}</button>
         {gateErr && <p className="cart-err">{gateErr}</p>}
@@ -594,11 +776,13 @@ function AdminPage({ onClose }: { onClose: () => void }) {
         <div className="admin-tabs">
             <button type="button" className={tab === 'orders' ? 'atab sel' : 'atab'} onClick={() => setTab('orders')}>الطلبات</button>
             <button type="button" className={tab === 'products' ? 'atab sel' : 'atab'} onClick={() => setTab('products')}>المنتجات</button>
+            <button type="button" className={tab === 'contact' ? 'atab sel' : 'atab'} onClick={() => setTab('contact')}>التواصل</button>
+            <button type="button" className={tab === 'admins' ? 'atab sel' : 'atab'} onClick={() => setTab('admins')}>المشرفين</button>
         </div>
 
         {tab === 'orders' && <>
             <div className="admin-row">
-                <button type="button" className="btn btn-ghost" onClick={() => loadOrders(code)}>تحديث</button>
+                <button type="button" className="btn btn-ghost" onClick={() => loadOrders(cred)}>تحديث</button>
                 <button type="button" className="btn btn-ghost" onClick={() => { safeClearCode(); setAuthed(false); }}>خروج</button>
             </div>
             {orders === null && <p className="admin-note">جاري تحميل الطلبات…</p>}
@@ -621,28 +805,124 @@ function AdminPage({ onClose }: { onClose: () => void }) {
         </>}
 
         {tab === 'products' && <>
+            <div className="admin-row admin-actions-top">
+                <button type="button" className="btn btn-ghost" onClick={() => setProds([{ name: '', code: '', price: 0, cat: 'كهرباء', desc: '', imgUrl: '', stock: true, images: [], video: '' }, ...(prods || [])])}>+ إضافة منتج</button>
+                <button type="button" className="btn btn-amber" onClick={saveProducts}>حفظ التعديلات</button>
+            </div>
+            <label className="field admin-search">دوّر في المنتجات
+                <input value={prodQuery} placeholder="بالاسم أو الكود…" onChange={(e) => setProdQuery(e.target.value)} />
+            </label>
+            {msg && tab === 'products' && <p className="admin-msg">{msg}</p>}
             {!customProds && <p className="admin-note">الموقع شغال دلوقتي بالقايمة المبدئية. أول حفظ هنا هينقلها للباك إند ويبقى التعديل من هنا مباشر.</p>}
             {prods === null && <p className="admin-note">جاري تحميل المنتجات…</p>}
-            {(prods || []).map((p, i) => <div className="prod-edit" key={i}>
+            {prods !== null && prodGroups.every((g) => !g.items.length) && <p className="admin-note">مفيش منتجات مطابقة للبحث.</p>}
+            {prodGroups.map((g) => g.items.length === 0 ? null : <div key={g.cat}>
+                <h3 className="pe-cat-head">{g.cat} ({num(g.items.length)})</h3>
+                {g.items.map(({ p, i }) => <div className="prod-edit" key={i}>
                 <div className="pe-grid">
                     <label className="field">الاسم<input value={p.name} onChange={(e) => setProds(prods!.map((x, j) => j === i ? { ...x, name: e.target.value } : x))} /></label>
                     <label className="field">الكود<input dir="ltr" value={p.code} onChange={(e) => setProds(prods!.map((x, j) => j === i ? { ...x, code: e.target.value.toUpperCase() } : x))} /></label>
                     <label className="field">السعر (جنيه)<input type="number" min="0" step="0.5" dir="ltr" value={p.price} onChange={(e) => setProds(prods!.map((x, j) => j === i ? { ...x, price: Number(e.target.value) } : x))} /></label>
                     <label className="field">القسم<select value={p.cat} onChange={(e) => setProds(prods!.map((x, j) => j === i ? { ...x, cat: e.target.value as Cat } : x))}><option>كهرباء</option><option>أدوات صحية</option></select></label>
                     <label className="field pe-wide">الوصف<input value={p.desc || ''} onChange={(e) => setProds(prods!.map((x, j) => j === i ? { ...x, desc: e.target.value } : x))} /></label>
-                    <label className="field pe-wide">رابط صورة (اختياري)<input dir="ltr" placeholder="https://…" value={p.imgUrl || ''} onChange={(e) => setProds(prods!.map((x, j) => j === i ? { ...x, imgUrl: e.target.value } : x))} /></label>
-                    <label className="pe-stock"><input type="checkbox" checked={p.stock !== false} onChange={(e) => setProds(prods!.map((x, j) => j === i ? { ...x, stock: e.target.checked } : x))} /> متوفر</label>
+                    <label className="pe-stock"><input type="checkbox" checked={p.stock !== false} onChange={(e) => setProds(prods!.map((x, j) => j === i ? { ...x, stock: e.target.checked } : x))} /> متوفر في المحل</label>
+                </div>
+                <div className="pe-media">
+                    <b>صور المنتج ({num((p.images || []).length)}/٦)</b>
+                    <div className="pe-thumbs">
+                        {(p.images || []).map((mid, k) => <span className="pe-thumb" key={mid + k}>
+                            <img src={mediaUrl(mid)} alt="" />
+                            <button type="button" className="pe-thumb-del" onClick={() => setProds(prods!.map((x, j) => j === i ? { ...x, images: (x.images || []).filter((_, q) => q !== k) } : x))} aria-label="حذف الصورة">×</button>
+                        </span>)}
+                        {(p.images || []).length < 6 && <label className="pe-add-media">
+                            {uploading === 'img' + i ? 'جاري الرفع…' : '+ صورة'}
+                            <input type="file" accept="image/*" hidden disabled={!!uploading} onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadImage(i, f); e.target.value = ''; }} />
+                        </label>}
+                    </div>
+                    <div className="pe-video-row">
+                        {p.video
+                            ? <span className="pe-video-has">فيديو مضاف <button type="button" className="pe-thumb-del" onClick={() => setProds(prods!.map((x, j) => j === i ? { ...x, video: '' } : x))} aria-label="حذف الفيديو">×</button></span>
+                            : <label className="pe-add-media">
+                                {uploading === 'vid' + i ? 'جاري رفع الفيديو…' : '+ فيديو (حد أقصى 17 ميجا)'}
+                                <input type="file" accept="video/*" hidden disabled={!!uploading} onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadVideo(i, f); e.target.value = ''; }} />
+                            </label>}
+                    </div>
                 </div>
                 <button type="button" className="pe-del" onClick={() => setProds(prods!.filter((_, j) => j !== i))}>حذف المنتج</button>
             </div>)}
+            </div>)}
             <div className="admin-row">
-                <button type="button" className="btn btn-ghost" onClick={() => setProds([...(prods || []), { name: '', code: '', price: 0, cat: 'كهرباء', desc: '', imgUrl: '', stock: true }])}>+ إضافة منتج</button>
                 <button type="button" className="btn btn-amber" onClick={saveProducts}>حفظ التعديلات</button>
             </div>
-            {msg && <p className="admin-msg">{msg}</p>}
+        </>}
+
+        {tab === 'contact' && <>
+            {siteForm === null && <p className="admin-note">جاري التحميل…</p>}
+            {siteForm && <>
+                <div className="admin-row admin-actions-top">
+                    <button type="button" className="btn btn-amber" onClick={saveSite}>حفظ بيانات التواصل</button>
+                </div>
+                {msg && tab === 'contact' && <p className="admin-msg">{msg}</p>}
+                <div className="prod-edit">
+                    <div className="pe-grid">
+                        <label className="field pe-wide">رقم التليفون الأساسي<input dir="ltr" inputMode="tel" value={siteForm.phone} onChange={(e) => setSiteForm({ ...siteForm, phone: e.target.value })} /></label>
+                        <label className="field pe-wide">رقم تليفون إضافي (اختياري)<input dir="ltr" inputMode="tel" value={siteForm.phone2 || ''} onChange={(e) => setSiteForm({ ...siteForm, phone2: e.target.value })} /></label>
+                        <label className="field pe-wide">رقم الواتساب (لو مختلف عن الأساسي)<input dir="ltr" inputMode="tel" value={siteForm.whatsapp || ''} onChange={(e) => setSiteForm({ ...siteForm, whatsapp: e.target.value })} /></label>
+                        <label className="field pe-wide">العنوان<input value={siteForm.address} onChange={(e) => setSiteForm({ ...siteForm, address: e.target.value })} /></label>
+                        <label className="field pe-wide">مواعيد العمل<input value={siteForm.hours} onChange={(e) => setSiteForm({ ...siteForm, hours: e.target.value })} /></label>
+                    </div>
+                </div>
+                <p className="admin-note">البيانات دي بتظهر في صفحة التواصل والفوتر وأزرار الاتصال والواتساب على الموقع.</p>
+            </>}
+        </>}
+
+        {tab === 'admins' && <>
+            {msg && tab === 'admins' && <p className="admin-msg">{msg}</p>}
+            <div className="prod-edit">
+                <b>إضافة مشرف جديد</b>
+                <div className="pe-grid">
+                    <label className="field">اسم المستخدم<input dir="ltr" value={newAdmin.user} onChange={(e) => setNewAdmin({ ...newAdmin, user: e.target.value })} /></label>
+                    <label className="field">كلمة السر<input dir="ltr" type="password" value={newAdmin.pass} onChange={(e) => setNewAdmin({ ...newAdmin, pass: e.target.value })} /></label>
+                </div>
+                <button type="button" className="btn btn-amber" onClick={addAdmin} disabled={!newAdmin.user.trim() || !newAdmin.pass}>إضافة المشرف</button>
+            </div>
+            {admins === null && <p className="admin-note">جاري التحميل…</p>}
+            {(admins || []).map((a) => <AdminRow key={a.user} a={a} cred={cred} onChanged={() => loadAdmins(cred)} onDeleted={() => delAdmin(a.user)} />)}
+            <p className="admin-note">الكود الرئيسي يفضل شغال دايما كدخول احتياطي، حتى لو مفيش مشرفين مضافين.</p>
         </>}
     </div>}
         </div>
+    </div>;
+}
+
+function AdminRow({ a, cred, onChanged, onDeleted }: { a: { user: string }; cred: string; onChanged: () => void; onDeleted: () => void }) {
+    const [edit, setEdit] = useState(false);
+    const [nu, setNu] = useState(a.user);
+    const [np, setNp] = useState('');
+    const [err, setErr] = useState('');
+    const save = async () => {
+        setErr('');
+        try {
+            await apiFetch('/api/admin/admins/update', { method: 'POST', body: JSON.stringify({ user: a.user, newUser: nu.trim(), newPass: np }) }, cred);
+            setEdit(false); setNp(''); onChanged();
+        } catch (e: any) {
+            setErr(e?.message === 'user_exists' ? 'الاسم ده موجود.' : e?.message === 'bad_fields' ? 'اسم 3 حروف على الأقل، وكلمة السر لو بتتغير 6 على الأقل.' : 'مشكلة. جرب تاني.');
+        }
+    };
+    return <div className="prod-edit">
+        <div className="admin-user-row">
+            <b dir="ltr">{a.user}</b>
+            <span className="admin-user-actions">
+                <button type="button" className="btn btn-ghost" onClick={() => setEdit(!edit)}>{edit ? 'إلغاء' : 'تعديل'}</button>
+                <button type="button" className="pe-del" onClick={onDeleted}>حذف</button>
+            </span>
+        </div>
+        {edit && <div className="pe-grid">
+            <label className="field">اسم المستخدم<input dir="ltr" value={nu} onChange={(e) => setNu(e.target.value)} /></label>
+            <label className="field">كلمة سر جديدة (اتركها فاضية لو مش عايز تغيرها)<input dir="ltr" type="password" value={np} onChange={(e) => setNp(e.target.value)} /></label>
+            <button type="button" className="btn btn-amber pe-wide" onClick={save}>حفظ</button>
+            {err && <p className="cart-err pe-wide">{err}</p>}
+        </div>}
     </div>;
 }
 
@@ -656,13 +936,34 @@ export function App() {
     const [adminOpen, setAdminOpen] = useState(false);
     const [catalog, setCatalog] = useState<Product[]>(products);
     const [apiLive, setApiLive] = useState(false);
+    const [site, setSite] = useState<SiteInfo>(defaultSite);
 
     useEffect(() => {
         if (!API_BASE) return;
         apiFetch('/api/products')
             .then((r) => { if (Array.isArray(r.products) && r.products.length) { setCatalog(r.products.map(fromApi)); setApiLive(true); } })
             .catch(() => {});
+        apiFetch('/api/site')
+            .then((r) => { if (r.site && r.site.phone) setSite({ ...defaultSite, ...r.site }); })
+            .catch(() => {});
     }, []);
+
+    // سحب لتحديث الصفحة على الموبايل (الشيل ثابت فالمتصفح مش بيعملها لوحده)
+    const ptrRef = { y: 0, active: false };
+    const [ptr, setPtr] = useState(0);
+    const onMainTouchStart = (e: React.TouchEvent) => {
+        const m = e.currentTarget as HTMLElement;
+        if (m.scrollTop <= 0) { ptrRef.y = e.touches[0].clientY; ptrRef.active = true; }
+    };
+    const onMainTouchMove = (e: React.TouchEvent) => {
+        if (!ptrRef.active) return;
+        const d = e.touches[0].clientY - ptrRef.y;
+        setPtr(d > 0 ? Math.min(d, 140) : 0);
+    };
+    const onMainTouchEnd = () => {
+        if (ptrRef.active && ptr > 90) { window.location.reload(); return; }
+        ptrRef.active = false; setPtr(0);
+    };
 
     const showToast = (msg: string) => {
         setToast(msg);
@@ -683,6 +984,7 @@ export function App() {
     const cartCount = Object.values(cart).reduce((s, n) => s + n, 0);
 
     return <FileCard>
+        <SiteCtx.Provider value={site}>
         <ShopCtx.Provider value={{ catalog, apiLive }}>
         <CartCtx.Provider value={{ cart, add, setQty, open: () => setCartOpen(true) }}>
             <div dir="rtl" className="app-shell">
@@ -700,11 +1002,12 @@ export function App() {
                             <Ic id="i-cart" />السلة
                             {cartCount > 0 && <span className="cart-count">{num(cartCount)}</span>}
                         </button>
-                        <a href={shop.phoneHref} className="header-cta"><Ic id="i-phone" />اتصل بالمحل</a>
+                        <HeaderCallLink className="header-cta"><Ic id="i-phone" />اتصل بالمحل</HeaderCallLink>
                     </nav>
-                    <a href={shop.phoneHref} className="header-call" aria-label="اتصل بالمحل"><Ic id="i-phone" /></a>
+                    <HeaderCallLink className="header-call" aria-label="اتصل بالمحل"><Ic id="i-phone" /></HeaderCallLink>
                 </header>
-                <main className="app-main">
+                <main className="app-main" onTouchStart={onMainTouchStart} onTouchMove={onMainTouchMove} onTouchEnd={onMainTouchEnd}>
+                    {ptr > 12 && <div className={'ptr-ind' + (ptr > 90 ? ' ready' : '')} style={{ opacity: Math.min(1, ptr / 60) }}>{ptr > 90 ? 'سيب عشان التحديث ⟳' : '⟳'}</div>}
                     <Routes>
                         <Route path="/" element={<Home />} />
                         <Route path="/products" element={<Products onOpen={setDlgProduct} />} />
@@ -712,14 +1015,14 @@ export function App() {
                     <footer className="footer">
                         <div className="footer-brand"><img src={logo} alt="" /><span>MANSOUR</span></div>
                         <p>{shop.legalName}</p>
-                        <a className="footer-phone" href={shop.phoneHref}>{shop.phone}</a>
+                        <FooterPhones />
                         <small>© 2026 MANSOUR. جميع الحقوق محفوظة.</small>
                         <small>نسخة للمراجعة: الصور والأسعار والأكواد استرشادية.</small>
                         <button type="button" className="footer-admin" onClick={() => setAdminOpen(true)}>لوحة التحكم</button>
                     </footer>
                 </main>
 
-                <a className="wa-float" href={shop.whatsappHref} target="_blank" rel="noreferrer" aria-label="تواصل معنا على واتساب"><Ic id="i-wa" style={{ fontSize: 30 }} /></a>
+                <WaFloat />
 
                 <nav className="bottom-nav" aria-label="التنقل السريع">
                     <NavLink to="/" end className="bn" onClick={scrollTopSoon}><Ic id="i-home" />الرئيسية</NavLink>
@@ -737,5 +1040,6 @@ export function App() {
             </div>
         </CartCtx.Provider>
         </ShopCtx.Provider>
+        </SiteCtx.Provider>
     </FileCard>;
 }

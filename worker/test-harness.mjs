@@ -62,5 +62,59 @@ check('negative price rejected', r.status === 400);
 r = await call('PUT', '/api/admin/products', { products: [...seed, { ...seed[0] }] }, 'test-code-123');
 check('duplicate code rejected', r.status === 400 && r.body.error === 'duplicate_code');
 
-console.log(failed ? `\n${failed} FAILURES` : '\nALL PASS');
+
+// ===== v2: site / media / admins / gallery fields =====
+r = await call('PUT', '/api/admin/site', { site: { phone: '01021924181', phone2: '0100', whatsapp: '', address: 'حلوان أطلس', hours: '10-11' } }, 'test-code-123');
+check('PUT site ok', r.status === 200 && r.body.ok);
+r = await call('GET', '/api/site');
+check('GET site public', r.status === 200 && r.body.site.phone === '01021924181' && !r.body.site.whatsapp);
+r = await call('PUT', '/api/admin/site', { site: { address: 'x' } }, 'test-code-123');
+check('PUT site missing phone rejected', r.status === 400);
+
+const png1x1 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+r = await call('POST', '/api/admin/media', { data: png1x1, type: 'image/png' }, 'test-code-123');
+check('media upload ok', r.status === 200 && /^m-/.test(r.body.id));
+const mid = r.body.id;
+const mr = await worker.fetch(new Request('https://api.test/api/media/' + mid), env);
+check('media served with type+cache', mr.status === 200 && mr.headers.get('content-type') === 'image/png' && /max-age=31536000/.test(mr.headers.get('cache-control') || ''));
+
+r = await call('PUT', '/api/admin/products', { products: [{ ...seed[0], images: [mid, 'https://ok.com/a.jpg'], video: mid }] }, 'test-code-123');
+check('product with gallery+video saved', r.status === 200);
+r = await call('GET', '/api/products');
+check('gallery survives round-trip', r.body.products[0].images.length === 2 && r.body.products[0].video === mid);
+r = await call('PUT', '/api/admin/products', { products: [{ ...seed[0], images: ['javascript:x'], video: 'not a ref' }] }, 'test-code-123');
+check('bad media refs stripped', r.status === 200);
+r = await call('GET', '/api/products');
+check('bad refs gone after sanitize', r.body.products[0].images.length === 0 && r.body.products[0].video === '');
+
+r = await call('POST', '/api/admin/admins', { user: 'mansour', pass: 'secret1' }, 'test-code-123');
+check('add admin ok', r.status === 200 && r.body.ok);
+r = await call('GET', '/api/admin/orders', null, 'mansour:secret1');
+check('admin user:pass auth works', r.status === 200);
+r = await call('GET', '/api/admin/orders', null, 'mansour:wrong');
+check('wrong admin pass rejected', r.status === 401);
+r = await call('POST', '/api/admin/admins', { user: 'mansour', pass: 'secret1' }, 'test-code-123');
+check('duplicate admin rejected', r.status === 400);
+r = await call('POST', '/api/admin/admins/update', { user: 'mansour', newPass: 'secret2' }, 'test-code-123');
+check('change password ok', r.status === 200);
+r = await call('GET', '/api/admin/orders', null, 'mansour:secret2');
+check('new password works', r.status === 200);
+r = await call('GET', '/api/admin/orders', null, 'mansour:secret1');
+check('old password dead', r.status === 401);
+r = await call('POST', '/api/admin/admins/update', { user: 'mansour', newUser: 'mansour2' }, 'test-code-123');
+check('rename admin ok', r.status === 200);
+r = await call('POST', '/api/admin/admins/delete', { user: 'mansour2' }, 'test-code-123');
+check('deleting only admin refused', r.status === 400 && r.body.error === 'last_admin');
+r = await call('POST', '/api/admin/admins', { user: 'helper', pass: 'secret9' }, 'test-code-123');
+check('second admin added', r.status === 200);
+r = await call('POST', '/api/admin/admins/delete', { user: 'mansour2' }, 'test-code-123');
+check('delete admin ok', r.status === 200);
+r = await call('POST', '/api/admin/admins/delete', { user: 'mansour2' }, 'test-code-123');
+check('delete missing admin 404', r.status === 404);
+r = await call('POST', '/api/admin/admins', { user: 'ab', pass: 'secret1' }, 'test-code-123');
+check('short username rejected', r.status === 400);
+r = await call('GET', '/api/admin/admins', null, 'test-code-123');
+check('list admins hides hashes', r.status === 200 && r.body.admins.length === 1 && r.body.admins[0].user === 'helper' && !('hash' in r.body.admins[0]));
+
+console.log(failed ? 'FAILED: ' + failed : 'ALL PASS');
 process.exit(failed ? 1 : 0);
