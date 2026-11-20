@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { api, buildWaText, clearCred, cred, fmt, fmtTime, paymentLabel, saveCred, Invoice, InvoiceItem, Product, Staff } from './lib';
 import SellScreen from './SellScreen';
 import { CloseScreen, InvoicesScreen, StaffScreen, StockScreen } from './screens';
@@ -42,8 +43,12 @@ export default function App() {
     // طباعة: بنحط الفاتورة في منطقة الطباعة وبعدين window.print
     useEffect(() => {
         if (printJob) {
-            const t = setTimeout(() => { window.print(); setPrintJob(null); }, 60);
-            return () => clearTimeout(t);
+            document.body.classList.add('printing');
+            const clear = () => { setPrintJob(null); document.body.classList.remove('printing'); };
+            const t = setTimeout(() => { window.print(); clear(); }, 80);
+            const onAfter = () => clear();
+            window.addEventListener('afterprint', onAfter);
+            return () => { clearTimeout(t); window.removeEventListener('afterprint', onAfter); document.body.classList.remove('printing'); };
         }
     }, [printJob]);
 
@@ -81,6 +86,22 @@ export default function App() {
             try { await navigator.clipboard.writeText(text); notify('اتنسخ نص الفاتورة ✓'); } catch { notify('المشاركة مش متاحة على الجهاز ده', true); }
         }
     };
+
+    // وضع اختبار الطباعة: /pos/?print-test=r80 أو a4 — يعرض فاتورة تجريبية على الشاشة بنفس CSS الطباعة
+    const printTest = typeof location !== 'undefined' && new URLSearchParams(location.search).get('print-test');
+    if (printTest === 'r80' || printTest === 'a4') {
+        const demoInv: Invoice = { id: 1, num: 'INV-000002', ts: new Date().toISOString(), staff: 'mansour', payment: 'cash', subtotal: 265, discount: 0, total: 265, status: 'completed', customer_name: '', customer_phone: '' };
+        const demoItems: InvoiceItem[] = [
+            { code: 'EL-101', name: 'لمبة ليد 12 وات', price: 90, qty: 2, discount: 0, line_total: 180 },
+            { code: 'EL-103', name: 'بريزة ديكور ثلاثية', price: 85, qty: 1, discount: 0, line_total: 85 },
+        ];
+        return (
+            <div style={{ background: '#888', minHeight: '100vh', padding: 16 }}>
+                <style>{`.print-area{display:block !important;background:#fff}`}</style>
+                <PrintDoc inv={demoInv} items={demoItems} mode={printTest} logo={logo} />
+            </div>
+        );
+    }
 
     if (booting) return <div className="pos-shell"><div className="empty" style={{ marginTop: 120 }}>⏳ جاري التحميل…</div></div>;
 
@@ -189,7 +210,7 @@ export default function App() {
             ) : null}
 
             {toast ? <div className="toast" style={toast.bad ? { background: 'var(--danger)' } : {}}>{toast.msg}</div> : null}
-            {printJob ? <PrintDoc inv={printJob.inv} items={printJob.items} mode={printJob.mode} logo={logo} /> : null}
+            {printJob ? createPortal(<PrintDoc inv={printJob.inv} items={printJob.items} mode={printJob.mode} logo={logo} />, document.body) : null}
         </div>
     );
 }
