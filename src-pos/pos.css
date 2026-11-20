@@ -85,7 +85,7 @@ input,select,textarea{font-family:inherit;font-size:16px}
 
 /* تبديل الدفع */
 .pay-toggle{display:flex;gap:8px}
-.pay-toggle button{flex:1;border:2px solid var(--line);background:#fff;border-radius:14px;padding:12px;font-size:15px;font-weight:800;color:var(--muted)}
+.pay-toggle button{flex:1;min-width:0;border:2px solid var(--line);background:#fff;border-radius:14px;padding:12px 6px;font-size:14px;font-weight:800;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pay-toggle button.on{border-color:var(--amber);background:#fff8ea;color:var(--navy)}
 
 /* فواتير */
