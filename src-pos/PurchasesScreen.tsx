@@ -71,7 +71,7 @@ export default function PurchasesScreen({ products, refresh, notify, onChequesCh
                         </button>
                     ))}
                 </>
-            ) : (
+            ) : view === 'suppliers' ? (
                 <>
                     <button className="btn btn-amber btn-block" style={{ marginBottom: 12 }} onClick={() => setSupOpen(true)}>＋ مورد جديد</button>
                     {suppliers === null ? <div className="empty">جاري التحميل…</div> : suppliers.length === 0 ? <div className="empty">مفيش موردين لسه</div> : suppliers.map((s) => (
@@ -84,7 +84,7 @@ export default function PurchasesScreen({ products, refresh, notify, onChequesCh
                         </button>
                     ))}
                 </>
-            )}
+            ) : null}
 
             {newOpen ? <NewPurchaseSheet products={products} suppliers={suppliers || []} onClose={() => setNewOpen(false)} onDone={() => { setNewOpen(false); load(); refresh(); notify('اتسجلت فاتورة الشراء والمخزون اتحدث ✓'); }} notify={notify} /> : null}
             {supOpen ? <NewSupplierSheet onClose={() => setSupOpen(false)} onDone={() => { setSupOpen(false); load(); notify('اتضاف المورد ✓'); }} notify={notify} /> : null}
