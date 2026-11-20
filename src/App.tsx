@@ -70,6 +70,7 @@ const API_BASE = 'https://mansour-shop-api.hosnynasser843.workers.dev';
 
 async function apiFetch(path: string, opts: RequestInit = {}, adminCode?: string): Promise<any> {
     const r = await fetch(API_BASE + path, {
+        cache: 'no-store',
         ...opts,
         headers: { 'Content-Type': 'application/json', ...(adminCode ? { 'X-Admin-Code': adminCode } : {}), ...(opts.headers || {}) },
     });
