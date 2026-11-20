@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, fmt, CartLine, Customer, Invoice, Product } from './lib';
 import ScannerModal from './ScannerModal';
+import CatChips from './CatChips';
 import { Loyalty } from './LoyaltyUI';
 
 export default function SellScreen({
@@ -167,13 +168,7 @@ export default function SellScreen({
                 </div>
             </div>
 
-            {categories.length > 0 ? (
-                <div className="cat-chips">
-                    <button className={catSel === '' ? 'on' : ''} onClick={() => setCatSel('')}>الكل</button>
-                    {categories.map((c) => <button key={c} className={catSel === c ? 'on' : ''} onClick={() => setCatSel(c)}>{c}</button>)}
-                    {hasUncat ? <button className={catSel === '__none' ? 'on' : ''} onClick={() => setCatSel('__none')}>غير مصنف</button> : null}
-                </div>
-            ) : null}
+            <CatChips categories={categories} sel={catSel} setSel={setCatSel} extraNone={hasUncat} />
 
             {filtered.length === 0 ? <div className="empty">مفيش أصناف مطابقة للبحث</div> : (
                 <div className="prod-grid">

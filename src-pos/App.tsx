@@ -48,6 +48,7 @@ function SettingsArea({ sub, setSub, staff, manager, chqAlerts, notify, categori
                         <span>{i.id === 'purchases' && chqAlerts > 0 ? <b style={{ background: 'var(--danger)', color: '#fff', borderRadius: 999, padding: '1px 8px', fontSize: 12, marginInlineEnd: 8 }}>{chqAlerts} شيك</b> : null}‹</span>
                     </button>
                 ))}
+                <a className="btn btn-ghost btn-block" style={{ display: 'block', padding: '14px 16px', textAlign: 'start', textDecoration: 'none' }} href="https://mansour-shop.pages.dev/" target="_blank" rel="noopener noreferrer">🌐 فتح موقع المحل</a>
                 <button className="btn btn-danger btn-block" style={{ padding: '14px 16px', marginTop: 8 }} onClick={onLogout}>🚪 تسجيل الخروج ({staff.user})</button>
             </div>
         </>

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, cairoToday, fmt, fmtTime, paymentLabel, Customer, Expense, Invoice, LedgerEntry, Product, Quote, Report, Role, Staff } from './lib';
+import CatChips from './CatChips';
 import ScannerModal from './ScannerModal';
 import { ExportCard, ProfitView } from './ReportsExtra';
 import { LoyaltySettingsCard, PointsSection, Loyalty } from './LoyaltyUI';
@@ -81,6 +82,33 @@ export function StockScreen({ staff, products, categories, refresh, notify }: { 
     };
     const s = q.trim().toLowerCase();
     const [catSel, setCatSel] = useState('');
+    const [form, setForm] = useState<{ mode: 'add' | 'edit'; name: string; code: string; price: string; cost: string; qty: string; cat: string } | null>(null);
+    const [fBusy, setFBusy] = useState(false);
+    const submitForm = async () => {
+        if (!form || fBusy) return;
+        const price = Number(form.price);
+        if (form.name.trim().length < 2) { notify('اكتب اسم الصنف', true); return; }
+        if (!isFinite(price) || form.price.trim() === '' || price < 0) { notify('اكتب سعر صحيح', true); return; }
+        setFBusy(true);
+        try {
+            if (form.mode === 'add') {
+                const r = await api('/api/pos/product', 'POST', { name: form.name.trim(), code: form.code.trim(), price, cost: Number(form.cost) || 0, qty: parseInt(form.qty, 10) || 0, cat: form.cat });
+                notify('اتضاف الصنف ' + r.code + ' ✓');
+            } else {
+                await api('/api/pos/product/' + encodeURIComponent(form.code), 'POST', { name: form.name.trim(), price, cost: form.cost.trim() === '' ? undefined : Number(form.cost) || 0 });
+                notify('اتعدل الصنف ✓');
+            }
+            setForm(null); refresh();
+        } catch (e: any) { notify(e?.data?.error === 'duplicate_code' ? 'الكود ده مستخدم لصنف تاني' : 'مشكلة في الحفظ', true); }
+        setFBusy(false);
+    };
+    const delProduct = async (p: Product) => {
+        if (!confirm(`مسح "${p.name}"؟ لو اتباع قبل كده هيتخفي من البيع والموقع وفواتيره القديمة تفضل زي ما هي.`)) return;
+        try {
+            const r = await api('/api/pos/product/' + encodeURIComponent(p.code) + '/delete', 'POST', {});
+            notify(r.hidden ? 'اتخفى الصنف (له فواتير قديمة) ✓' : 'اتمسح الصنف ✓'); refresh();
+        } catch { notify('مشكلة في المسح', true); }
+    };
     const filtered = products.filter((p) => (!catSel || p.cat === catSel) && (!s || p.name.toLowerCase().includes(s) || p.code.toLowerCase().includes(s)));
     const setCat = async (code: string, cat: string) => {
         try { await api('/api/pos/product-cat', 'POST', { code, cat }); refresh(); notify('اتغير التصنيف ✓'); } catch { notify('مشكلة في حفظ التصنيف', true); }
@@ -118,12 +146,8 @@ export function StockScreen({ staff, products, categories, refresh, notify }: { 
                     <input placeholder="ابحث بالاسم أو الكود…" value={q} onChange={(e) => setQ(e.target.value)} />
                 </div>
             </div>
-            {categories.length > 0 ? (
-                <div className="cat-chips">
-                    <button className={catSel === '' ? 'on' : ''} onClick={() => setCatSel('')}>الكل</button>
-                    {categories.map((c) => <button key={c} className={catSel === c ? 'on' : ''} onClick={() => setCatSel(c)}>{c}</button>)}
-                </div>
-            ) : null}
+            <CatChips categories={categories} sel={catSel} setSel={setCatSel} />
+            {manager ? <button className="btn btn-amber btn-block" style={{ marginBottom: 10 }} onClick={() => setForm({ mode: 'add', name: '', code: '', price: '', cost: '', qty: '', cat: '' })}>➕ إضافة صنف جديد</button> : null}
             {!manager ? <div className="err-box" style={{ background: '#fff8ea', color: 'var(--amber-d)' }}>عرض فقط — تعديل الأرصدة للمدير</div> : null}
             {low.length > 0 ? (
                 <div className="err-box" style={{ background: '#fdecec', color: 'var(--danger)', marginBottom: 10 }}>
@@ -139,6 +163,12 @@ export function StockScreen({ staff, products, categories, refresh, notify }: { 
                                 {categories.map((c) => <option key={c} value={c}>{c}</option>)}
                             </select>
                         ) : (p.cat ? <span>{p.cat}</span> : null)}
+                        {manager ? (
+                            <span style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+                                <button className="btn btn-ghost btn-sm" style={{ padding: '2px 10px' }} onClick={() => setForm({ mode: 'edit', name: p.name, code: p.code, price: String(p.price), cost: String((p as any).cost ?? ''), qty: '', cat: '' })}>✏️ تعديل</button>
+                                <button className="btn btn-ghost btn-sm" style={{ padding: '2px 10px', color: 'var(--danger)' }} onClick={() => delProduct(p)}>🗑️</button>
+                            </span>
+                        ) : null}
                     </div>
                     {manager ? (
                         <>
@@ -165,6 +195,35 @@ export function StockScreen({ staff, products, categories, refresh, notify }: { 
                     )}
                 </div>
             ))}
+            {form ? (
+                <>
+                    <div className="sheet-back" onClick={() => setForm(null)} />
+                    <div className="sheet">
+                        <div className="sheet-h">
+                            <h3>{form.mode === 'add' ? '➕ صنف جديد' : '✏️ تعديل ' + form.code}</h3>
+                            <button className="btn btn-ghost btn-sm" style={{ marginInlineStart: 'auto' }} onClick={() => setForm(null)}>قفل</button>
+                        </div>
+                        <div className="sheet-b" style={{ display: 'grid', gap: 10 }}>
+                            <input placeholder="اسم الصنف" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} style={{ padding: 11, border: '1.5px solid var(--line)', borderRadius: 10, fontSize: 16 }} />
+                            {form.mode === 'add' ? <input placeholder="الكود (سيبه فاضي = تلقائي)" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} dir="ltr" style={{ padding: 11, border: '1.5px solid var(--line)', borderRadius: 10, fontSize: 16, textAlign: 'end' }} /> : null}
+                            <input placeholder="سعر البيع (ج)" inputMode="decimal" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} style={{ padding: 11, border: '1.5px solid var(--line)', borderRadius: 10, fontSize: 16 }} />
+                            <input placeholder="سعر الشراء / التكلفة (اختياري)" inputMode="decimal" value={form.cost} onChange={(e) => setForm({ ...form, cost: e.target.value })} style={{ padding: 11, border: '1.5px solid var(--line)', borderRadius: 10, fontSize: 16 }} />
+                            {form.mode === 'add' ? (
+                                <>
+                                    <input placeholder="الكمية الافتتاحية" inputMode="numeric" value={form.qty} onChange={(e) => setForm({ ...form, qty: e.target.value })} style={{ padding: 11, border: '1.5px solid var(--line)', borderRadius: 10, fontSize: 16 }} />
+                                    {categories.length > 0 ? (
+                                        <select value={form.cat} onChange={(e) => setForm({ ...form, cat: e.target.value })} style={{ padding: 11, border: '1.5px solid var(--line)', borderRadius: 10, fontSize: 16, background: '#fff' }}>
+                                            <option value="">— التصنيف —</option>
+                                            {categories.map((c) => <option key={c} value={c}>{c}</option>)}
+                                        </select>
+                                    ) : null}
+                                </>
+                            ) : null}
+                            <button className="btn btn-amber btn-block" disabled={fBusy} onClick={submitForm}>{fBusy ? '…' : form.mode === 'add' ? '✅ إضافة الصنف' : '💾 حفظ التعديل'}</button>
+                        </div>
+                    </div>
+                </>
+            ) : null}
             {scanFor ? <ScannerModal title={'باركود: ' + scanFor} onScan={(code) => saveBarcode(scanFor, code)} onClose={() => setScanFor(null)} /> : null}
         </>
     );

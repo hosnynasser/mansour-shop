@@ -413,6 +413,65 @@ async function handlePos(request, env, path) {
         return json({ products, categories: await getCategories(env, products) });
     }
 
+    // إدارة الأصناف (مدير فقط): إضافة / تعديل / حذف — الكتالوج مشترك مع موقع المحل
+    if (path === '/api/pos/product' && request.method === 'POST') {
+        if (!manager) return json({ error: 'forbidden' }, 403);
+        let body;
+        try { body = await request.json(); } catch { return json({ error: 'bad_json' }, 400); }
+        const name = clean(body.name, 120);
+        const price = Number(body.price);
+        if (!name || !isFinite(price) || price < 0) return json({ error: 'bad_fields' }, 400);
+        const catalog = [...(await getCatalog(env))];
+        let code = clean(body.code, 40);
+        if (!code) {
+            let mx = 300;
+            for (const q of catalog) { const m = /^P-(\d+)$/.exec(q.code); if (m) mx = Math.max(mx, parseInt(m[1], 10)); }
+            code = 'P-' + (mx + 1);
+        }
+        if (catalog.some((q) => q.code === code)) return json({ error: 'duplicate_code' }, 409);
+        if (catalog.length >= 500) return json({ error: 'too_many' }, 400);
+        const cat = clean(body.cat, 30);
+        const siteCat = (cat === 'كهرباء' || cat === 'أدوات صحية') ? cat : 'كهرباء';
+        const qty = Math.max(0, Math.min(1000000, parseInt(body.qty, 10) || 0));
+        const cost = Math.max(0, Number(body.cost) || 0);
+        catalog.push({ name, desc: '', price: Math.round(price * 100) / 100, code, cat: siteCat, stock: qty > 0 });
+        await env.SHOP_KV.put('products', JSON.stringify(catalog.map((q) => ({ ...sanitizeProduct(q) }))));
+        await env.POS_DB.prepare('INSERT INTO stock (code, qty, cost) VALUES (?, ?, ?) ON CONFLICT(code) DO UPDATE SET qty = excluded.qty, cost = excluded.cost').bind(code, qty, cost).run();
+        if (cat) await env.POS_DB.prepare('INSERT INTO prod_cat (code, cat) VALUES (?, ?) ON CONFLICT(code) DO UPDATE SET cat = excluded.cat').bind(code, cat).run();
+        await syncStockFlags(env);
+        return json({ ok: true, code });
+    }
+    let pm = path.match(/^\/api\/pos\/product\/([^/]+)(\/delete)?$/);
+    if (pm && request.method === 'POST') {
+        if (!manager) return json({ error: 'forbidden' }, 403);
+        const code = decodeURIComponent(pm[1]);
+        let body = {};
+        try { body = await request.json(); } catch { body = {}; }
+        const catalog = [...(await getCatalog(env))];
+        const i = catalog.findIndex((q) => q.code === code);
+        if (i < 0) return json({ error: 'not_found' }, 404);
+        if (pm[2]) {
+            if (catalog.length <= 1) return json({ error: 'last_product' }, 400);
+            const u1 = await env.POS_DB.prepare('SELECT COUNT(*) c FROM invoice_items WHERE code = ?').bind(code).first();
+            const u2 = await env.POS_DB.prepare('SELECT COUNT(*) c FROM purchase_items WHERE code = ?').bind(code).first();
+            const used = (u1?.c || 0) + (u2?.c || 0) > 0;
+            catalog.splice(i, 1);
+            await env.SHOP_KV.put('products', JSON.stringify(catalog.map((q) => sanitizeProduct(q))));
+            if (!used) {
+                await env.POS_DB.prepare('DELETE FROM stock WHERE code = ?').bind(code).run();
+                await env.POS_DB.prepare('DELETE FROM prod_cat WHERE code = ?').bind(code).run();
+            }
+            return json({ ok: true, hidden: used });
+        }
+        const name = clean(body.name, 120);
+        const price = Number(body.price);
+        if (!name || !isFinite(price) || price < 0) return json({ error: 'bad_fields' }, 400);
+        catalog[i] = { ...catalog[i], name, price: Math.round(price * 100) / 100 };
+        await env.SHOP_KV.put('products', JSON.stringify(catalog.map((q) => sanitizeProduct(q))));
+        if (body.cost !== undefined) await env.POS_DB.prepare('INSERT INTO stock (code, qty, cost) VALUES (?, 0, ?) ON CONFLICT(code) DO UPDATE SET cost = excluded.cost').bind(code, Math.max(0, Number(body.cost) || 0)).run();
+        return json({ ok: true });
+    }
+
     // تصنيفات الأصناف (مدير فقط للتعديل)
     if (path === '/api/pos/categories' && request.method === 'POST') {
         if (!manager) return json({ error: 'forbidden' }, 403);
