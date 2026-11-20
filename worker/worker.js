@@ -55,6 +55,8 @@ async function staffAuth(request, env) {
         const user = clean(h.slice(0, i), 40);
         const pass = h.slice(i + 1).slice(0, 100);
         if (!user || !pass) return null;
+        // الكود الرئيسي كباسورد مع أي اسم مستخدم = مدير
+        if (env.ADMIN_CODE && pass === env.ADMIN_CODE) return { user, role: 'manager' };
         const hash = await sha256(pass);
         const admins = await getAdmins(env);
         const a = admins.find((x) => x.user === user && x.hash === hash);
