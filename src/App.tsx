@@ -579,7 +579,7 @@ function CartPage({ onClose, cust, setCust }: { onClose: () => void; cust: Cust;
 
 // ===== لوحة تحكم المدير (صفحة مخفية) =====
 type ApiProduct = { name: string; desc?: string; price: number; code: string; cat: Cat; imgUrl?: string; stock?: boolean; images?: string[]; video?: string };
-type ApiOrder = { id: string; ts: string; status: 'new' | 'done'; customer: { name: string; phone: string; address: string }; lines: { code: string; name: string; price: number; qty: number }[]; total: number };
+type ApiOrder = { id: string; ts: string; status: 'new' | 'preparing' | 'done'; customer: { name: string; phone: string; address: string }; lines: { code: string; name: string; price: number; qty: number }[]; total: number };
 
 // ضغط الصورة قبل الرفع: أقصى مقاس 1280 وجودة JPEG ~0.82
 function fileToJpegBase64(file: File, maxDim = 1280): Promise<string> {
@@ -611,9 +611,12 @@ function fileToBase64Raw(file: File): Promise<string> {
     });
 }
 
-const safeGetCode = () => { try { return sessionStorage.getItem('adminCode') || ''; } catch { return ''; } };
-const safeSetCode = (v: string) => { try { sessionStorage.setItem('adminCode', v); } catch { /* sandboxed preview */ } };
-const safeClearCode = () => { try { sessionStorage.removeItem('adminCode'); } catch { /* sandboxed preview */ } };
+// الجلسة بتتخزن في localStorage عشان الريفرش/فتح تاب جديد ما يطلّعش المدير من اللوحة
+const safeGetCode = () => { try { return localStorage.getItem('adminCode') || sessionStorage.getItem('adminCode') || ''; } catch { return ''; } };
+const safeSetCode = (v: string) => { try { localStorage.setItem('adminCode', v); } catch { /* sandboxed preview */ } try { sessionStorage.removeItem('adminCode'); } catch { /* sandboxed preview */ } };
+const safeClearCode = () => { try { localStorage.removeItem('adminCode'); } catch { /* sandboxed preview */ } try { sessionStorage.removeItem('adminCode'); } catch { /* sandboxed preview */ } };
+const safeGetPanelOpen = () => { try { return localStorage.getItem('adminPanelOpen') === '1'; } catch { return false; } };
+const safeSetPanelOpen = (v: boolean) => { try { v ? localStorage.setItem('adminPanelOpen', '1') : localStorage.removeItem('adminPanelOpen'); } catch { /* sandboxed preview */ } };
 
 function AdminPage({ onClose }: { onClose: () => void }) {
     const [user, setUser] = useState('');
@@ -628,6 +631,8 @@ function AdminPage({ onClose }: { onClose: () => void }) {
     const [customProds, setCustomProds] = useState(false);
     const [msg, setMsg] = useState('');
     const [prodQuery, setProdQuery] = useState('');
+    const [prodCat, setProdCat] = useState<'الكل' | Cat>('الكل');
+    const [orderStage, setOrderStage] = useState<'new' | 'preparing' | 'done'>('new');
     const [uploading, setUploading] = useState('');
     const [siteForm, setSiteForm] = useState<SiteInfo | null>(null);
     const [admins, setAdmins] = useState<{ user: string }[] | null>(null);
@@ -675,7 +680,7 @@ function AdminPage({ onClose }: { onClose: () => void }) {
         setGateBusy(false);
     };
 
-    const setStatus = async (id: string, status: 'new' | 'done') => {
+    const setStatus = async (id: string, status: 'new' | 'preparing' | 'done') => {
         await apiFetch('/api/admin/orders/status', { method: 'POST', body: JSON.stringify({ id, status }) }, cred);
         setOrders((os) => (os || []).map((o) => (o.id === id ? { ...o, status } : o)));
     };
@@ -747,10 +752,14 @@ function AdminPage({ onClose }: { onClose: () => void }) {
         }
     };
 
-    const prodGroups: { cat: Cat; items: { p: ApiProduct; i: number }[] }[] = (['كهرباء', 'أدوات صحية'] as Cat[]).map((cat) => ({
-        cat,
-        items: (prods || []).map((p, i) => ({ p, i })).filter(({ p }) => p.cat === cat && (!prodQuery.trim() || normalize(`${p.name} ${p.desc || ''} ${p.code}`).includes(normalize(prodQuery.trim())))),
-    }));
+    const prodGroups: { cat: Cat; items: { p: ApiProduct; i: number }[] }[] = (['كهرباء', 'أدوات صحية'] as Cat[])
+        .filter((cat) => prodCat === 'الكل' || cat === prodCat)
+        .map((cat) => ({
+            cat,
+            items: (prods || []).map((p, i) => ({ p, i })).filter(({ p }) => p.cat === cat && (!prodQuery.trim() || normalize(`${p.name} ${p.desc || ''} ${p.code}`).includes(normalize(prodQuery.trim())))),
+        }));
+    const stageOrders = (orders || []).filter((o) => o.status === orderStage);
+    const stageCount = (s: 'new' | 'preparing' | 'done') => (orders || []).filter((o) => o.status === s).length;
 
     return <div className="sheet-page" role="dialog" aria-label="لوحة تحكم المحل">
         <div className="sheet-topbar">
@@ -786,21 +795,34 @@ function AdminPage({ onClose }: { onClose: () => void }) {
                 <button type="button" className="btn btn-ghost" onClick={() => loadOrders(cred)}>تحديث</button>
                 <button type="button" className="btn btn-ghost" onClick={() => { safeClearCode(); setAuthed(false); }}>خروج</button>
             </div>
+            <div className="admin-tabs ochips">
+                <button type="button" className={orderStage === 'new' ? 'atab sel' : 'atab'} onClick={() => setOrderStage('new')}>الطلبات ({num(stageCount('new'))})</button>
+                <button type="button" className={orderStage === 'preparing' ? 'atab sel' : 'atab'} onClick={() => setOrderStage('preparing')}>جاري التجهيز ({num(stageCount('preparing'))})</button>
+                <button type="button" className={orderStage === 'done' ? 'atab sel' : 'atab'} onClick={() => setOrderStage('done')}>التسليمات ({num(stageCount('done'))})</button>
+            </div>
             {orders === null && <p className="admin-note">جاري تحميل الطلبات…</p>}
             {orders !== null && orders.length === 0 && <p className="admin-note">لا توجد طلبات حتى الآن.</p>}
-            {(orders || []).map((o) => <div className="order-card" key={o.id}>
+            {orders !== null && orders.length > 0 && stageOrders.length === 0 && <p className="admin-note">
+                {orderStage === 'new' ? 'مفيش طلبات جديدة.' : orderStage === 'preparing' ? 'مفيش طلبات قيد التجهيز.' : 'مفيش تسليمات بعد.'}
+            </p>}
+            {stageOrders.map((o) => <div className="order-card" key={o.id}>
                 <div className="oc-head">
                     <b dir="ltr">{o.id}</b>
                     <small>{new Date(o.ts).toLocaleString('ar-EG')}</small>
-                    <span className={o.status === 'done' ? 'st-badge done' : 'st-badge'}>{o.status === 'done' ? 'اتجهّز' : 'جديد'}</span>
+                    <span className={'st-badge' + (o.status === 'done' ? ' done' : o.status === 'preparing' ? ' prep' : '')}>{o.status === 'done' ? 'اتسلّم' : o.status === 'preparing' ? 'جاري التجهيز' : 'جديد'}</span>
                 </div>
                 <div className="oc-cust">{o.customer.name} · <a href={`tel:${o.customer.phone}`} dir="ltr">{o.customer.phone}</a><br /><small>{o.customer.address}</small></div>
                 <ul className="oc-lines">{o.lines.map((l, i) => <li key={i}>{l.name} (كود {l.code}) × {num(l.qty)} = {num(l.price * l.qty)} ج</li>)}</ul>
                 <div className="oc-foot">
                     <b>الإجمالي: {num(o.total)} جنيه</b>
-                    <button type="button" className="btn btn-ghost" onClick={() => setStatus(o.id, o.status === 'done' ? 'new' : 'done')}>
-                        {o.status === 'done' ? 'إرجاع كجديد' : 'تم التجهيز ✓'}
-                    </button>
+                    <span className="oc-actions">
+                        {o.status === 'new' && <button type="button" className="btn btn-amber" onClick={() => setStatus(o.id, 'preparing')}>ابدأ التجهيز ←</button>}
+                        {o.status === 'preparing' && <>
+                            <button type="button" className="btn btn-ghost" onClick={() => setStatus(o.id, 'new')}>رجوع للطلبات</button>
+                            <button type="button" className="btn btn-amber" onClick={() => setStatus(o.id, 'done')}>تم التسليم ✓</button>
+                        </>}
+                        {o.status === 'done' && <button type="button" className="btn btn-ghost" onClick={() => setStatus(o.id, 'preparing')}>إرجاع للتجهيز</button>}
+                    </span>
                 </div>
             </div>)}
         </>}
@@ -813,6 +835,9 @@ function AdminPage({ onClose }: { onClose: () => void }) {
             <label className="field admin-search">دوّر في المنتجات
                 <input value={prodQuery} placeholder="بالاسم أو الكود…" onChange={(e) => setProdQuery(e.target.value)} />
             </label>
+            <div className="admin-tabs ochips">
+                {(['الكل', 'كهرباء', 'أدوات صحية'] as const).map((c) => <button key={c} type="button" className={prodCat === c ? 'atab sel' : 'atab'} onClick={() => setProdCat(c)}>{c}</button>)}
+            </div>
             {msg && tab === 'products' && <p className="admin-msg">{msg}</p>}
             {!customProds && <p className="admin-note">الموقع شغال دلوقتي بالقايمة المبدئية. أول حفظ هنا هينقلها للباك إند ويبقى التعديل من هنا مباشر.</p>}
             {prods === null && <p className="admin-note">جاري تحميل المنتجات…</p>}
@@ -934,7 +959,8 @@ export function App() {
     const [dlgProduct, setDlgProduct] = useState<Product | null>(null);
     const [cust, setCust] = useState<Cust>({ name: '', phone: '', addr: '' });
     const [toast, setToast] = useState('');
-    const [adminOpen, setAdminOpen] = useState(false);
+    const [adminOpen, setAdminOpenRaw] = useState(() => safeGetPanelOpen() && !!safeGetCode());
+    const setAdminOpen = (v: boolean) => { safeSetPanelOpen(v); setAdminOpenRaw(v); };
     const [catalog, setCatalog] = useState<Product[]>(products);
     const [apiLive, setApiLive] = useState(false);
     const [site, setSite] = useState<SiteInfo>(defaultSite);

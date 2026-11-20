@@ -56,6 +56,15 @@ check('status update ok', r.status === 200 && r.body.ok);
 r = await call('GET', '/api/admin/orders', null, 'test-code-123');
 check('status persisted', r.body.orders[0].status === 'done');
 
+r = await call('POST', '/api/admin/orders/status', { id: oid, status: 'preparing' }, 'test-code-123');
+check('preparing status ok', r.status === 200 && r.body.ok);
+r = await call('GET', '/api/admin/orders', null, 'test-code-123');
+check('preparing persisted', r.body.orders[0].status === 'preparing');
+r = await call('POST', '/api/admin/orders/status', { id: oid, status: 'bogus' }, 'test-code-123');
+check('bogus status falls back to new', r.status === 200 && r.body.ok);
+r = await call('GET', '/api/admin/orders', null, 'test-code-123');
+check('bogus status stored as new', r.body.orders[0].status === 'new');
+
 r = await call('PUT', '/api/admin/products', { products: [{ name: 'x', code: 'A', price: -5, cat: 'كهرباء' }] }, 'test-code-123');
 check('negative price rejected', r.status === 400);
 

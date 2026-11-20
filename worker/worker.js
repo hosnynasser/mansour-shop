@@ -28,7 +28,7 @@ const CORS = {
 function json(data, status = 200) {
     return new Response(JSON.stringify(data), {
         status,
-        headers: { 'Content-Type': 'application/json; charset=utf-8', ...CORS },
+        headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...CORS },
     });
 }
 
@@ -228,7 +228,7 @@ async function handle(request, env) {
             let body;
             try { body = await request.json(); } catch { return json({ error: 'bad_json' }, 400); }
             const id = clean(body.id, 60);
-            const status = body.status === 'done' ? 'done' : 'new';
+            const status = ['new', 'preparing', 'done'].includes(body.status) ? body.status : 'new';
             const raw = await env.SHOP_KV.get('order:' + id);
             if (!raw) return json({ error: 'not_found' }, 404);
             const order = JSON.parse(raw);

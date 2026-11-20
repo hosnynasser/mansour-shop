@@ -462,3 +462,9 @@ button.footer-admin{font-family:inherit}
 /* pull-to-refresh: ممنوع overscroll-behavior:auto هنا — بيبلع السحبة على أندرويد. السحب لتحديث مخصص بالجافاسكربت */
 .ptr-ind{position:fixed;top:0;left:0;right:0;z-index:200;pointer-events:none;display:flex;justify-content:center;align-items:center;height:44px;color:var(--navy);font-weight:700;font-size:14px;background:linear-gradient(#fff,#fff8)}
 .ptr-ind.ready{color:var(--amber,#b45309)}
+
+/* ===== v3: مراحل الطلبات + فلاتر أقسام المنتجات في اللوحة ===== */
+.st-badge.prep{background:#fff4e0;color:#b45309}
+.oc-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.ochips{margin:8px 0 4px}
+.ochips .atab{font-size:13.5px;padding:9px 0}
