@@ -24,6 +24,7 @@ export default function App() {
     const [convCustId, setConvCustId] = useState(0);
     const [convCustomers, setConvCustomers] = useState<Customer[] | null>(null);
     const [convBusy, setConvBusy] = useState(false);
+    const [chqAlerts, setChqAlerts] = useState(0);
 
     const notify = useCallback((msg: string, bad = false) => {
         setToast({ msg, bad });
@@ -33,6 +34,16 @@ export default function App() {
     const refreshProducts = useCallback(async () => {
         try { const r = await api('/api/pos/products'); setProducts(r.products || []); } catch {}
     }, []);
+
+    const refreshChequeAlerts = useCallback(async (announce = false) => {
+        try {
+            const r = await api('/api/pos/cheques');
+            const n = r.alerts?.count || 0;
+            setChqAlerts(n);
+            if (announce && n > 0) notify(`🔔 عندك ${r.alerts.overdue ? r.alerts.overdue + ' شيك متأخر' : ''}${r.alerts.overdue && r.alerts.dueSoon ? ' و ' : ''}${r.alerts.dueSoon ? r.alerts.dueSoon + ' شيك يستحق قريب' : ''} (المشتريات ← الشيكات)`);
+        } catch {}
+    }, [notify]);
+    useEffect(() => { if (staff && staff.role === 'manager') refreshChequeAlerts(true); }, [staff?.user, staff?.role]);
 
     useEffect(() => {
         (async () => {
@@ -189,7 +200,7 @@ export default function App() {
                 {tab === 'invoices' ? <InvoicesScreen staff={staff} openInvoice={openInvoice} openQuote={openQuote} notify={notify} /> : null}
                 {tab === 'customers' ? <CustomersScreen staff={staff} openInvoice={openInvoice} notify={notify} /> : null}
                 {tab === 'stock' ? <StockScreen staff={staff} products={products} refresh={refreshProducts} notify={notify} /> : null}
-                {tab === 'purchases' && manager ? <PurchasesScreen products={products} refresh={refreshProducts} notify={notify} /> : null}
+                {tab === 'purchases' && manager ? <PurchasesScreen products={products} refresh={refreshProducts} notify={notify} onChequesChanged={() => refreshChequeAlerts(false)} /> : null}
                 {tab === 'close' ? <CloseScreen staff={staff} notify={notify} /> : null}
                 {tab === 'reports' && manager ? <ReportsScreen notify={notify} /> : null}
                 {tab === 'staff' && manager ? <StaffScreen me={staff} notify={notify} /> : null}
@@ -198,7 +209,7 @@ export default function App() {
             <nav className="pos-nav">
                 {tabs.filter((t) => !t.managerOnly || manager).map((t) => (
                     <button key={t.id} className={tab === t.id ? 'on' : ''} onClick={() => setTab(t.id)}>
-                        <span className="ni">{t.icon}</span>{t.label}
+                        <span className="ni" style={{ position: 'relative' }}>{t.icon}{t.id === 'purchases' && chqAlerts > 0 ? <i style={{ position: 'absolute', top: -4, insetInlineEnd: -9, background: 'var(--danger)', color: '#fff', borderRadius: 999, fontSize: 10, fontStyle: 'normal', fontWeight: 800, minWidth: 16, height: 16, lineHeight: '16px', textAlign: 'center' }}>{chqAlerts}</i> : null}</span>{t.label}
                     </button>
                 ))}
             </nav>

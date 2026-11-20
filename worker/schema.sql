@@ -111,3 +111,28 @@ CREATE TABLE IF NOT EXISTS expenses (
     note TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_expenses_day ON expenses(day);
+
+-- stage 4 batch 2
+ALTER TABLE invoice_items ADD COLUMN cost REAL DEFAULT 0;
+CREATE TABLE IF NOT EXISTS supplier_payments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts TEXT, day TEXT, supplier_id INTEGER, amount REAL, staff TEXT, note TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_suppay_day ON supplier_payments(day);
+CREATE TABLE IF NOT EXISTS cheques (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts TEXT, day TEXT,
+    kind TEXT NOT NULL,           -- in = وارد من عميل / out = صادر لمورد
+    party TEXT,
+    customer_id INTEGER DEFAULT 0,
+    supplier_id INTEGER DEFAULT 0,
+    number TEXT DEFAULT '',
+    bank TEXT DEFAULT '',
+    amount REAL NOT NULL,
+    due_day TEXT NOT NULL,
+    status TEXT DEFAULT 'pending', -- pending / cleared / bounced
+    done_day TEXT DEFAULT '',
+    note TEXT DEFAULT '',
+    staff TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_cheques_due ON cheques(due_day);

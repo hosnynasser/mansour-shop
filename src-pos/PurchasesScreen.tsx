@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
+import ChequesPanel from './ChequesScreen';
 import { api, fmt, fmtTime, Product, Purchase, PurchaseItem, Supplier } from './lib';
 
 type Line = { code: string; qty: string; cost: string };
 
 // ---------- المشتريات والموردين (مدير فقط) ----------
-export default function PurchasesScreen({ products, refresh, notify }: { products: Product[]; refresh: () => void; notify: (m: string, b?: boolean) => void }) {
-    const [view, setView] = useState<'purchases' | 'suppliers'>('purchases');
+export default function PurchasesScreen({ products, refresh, notify, onChequesChanged }: { products: Product[]; refresh: () => void; notify: (m: string, b?: boolean) => void; onChequesChanged?: () => void }) {
+    const [view, setView] = useState<'purchases' | 'suppliers' | 'cheques'>('purchases');
     const [purchases, setPurchases] = useState<Purchase[] | null>(null);
     const [suppliers, setSuppliers] = useState<Supplier[] | null>(null);
     const [newOpen, setNewOpen] = useState(false);
@@ -51,7 +52,10 @@ export default function PurchasesScreen({ products, refresh, notify }: { product
             <div className="pay-toggle" style={{ marginBottom: 12 }}>
                 <button className={view === 'purchases' ? 'on' : ''} onClick={() => setView('purchases')}>🧾 فواتير الشراء</button>
                 <button className={view === 'suppliers' ? 'on' : ''} onClick={() => setView('suppliers')}>🚚 الموردين</button>
+                <button className={view === 'cheques' ? 'on' : ''} onClick={() => setView('cheques')}>💳 الشيكات</button>
             </div>
+
+            {view === 'cheques' ? <ChequesPanel notify={notify} onChanged={() => onChequesChanged && onChequesChanged()} /> : null}
 
             {view === 'purchases' ? (
                 <>

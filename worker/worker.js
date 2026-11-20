@@ -630,7 +630,10 @@ async function handlePos(request, env, path) {
         if (!sup) return json({ error: 'not_found' }, 404);
         const pay = Math.min(amount, sup.balance);
         const newBalance = Math.round((sup.balance - pay) * 100) / 100;
-        await env.POS_DB.prepare('UPDATE suppliers SET balance = balance - ? WHERE id = ?').bind(pay, id).run();
+        await env.POS_DB.batch([
+            env.POS_DB.prepare('UPDATE suppliers SET balance = balance - ? WHERE id = ?').bind(pay, id),
+            env.POS_DB.prepare("INSERT INTO supplier_payments (ts, day, supplier_id, amount, staff, note) VALUES (?, ?, ?, ?, ?, '')").bind(new Date().toISOString(), cairoDay(), id, pay, staff.user),
+        ]);
         return json({ ok: true, paid: pay, balance: newBalance });
     }
 
@@ -745,6 +748,167 @@ async function handlePos(request, env, path) {
         if (!manager && ex.staff !== staff.user) return json({ error: 'forbidden' }, 403);
         await env.POS_DB.prepare('DELETE FROM expenses WHERE id = ?').bind(id).run();
         return json({ ok: true });
+    }
+
+    // ---- الشيكات الآجلة (مدير فقط) ----
+    if (path === '/api/pos/cheques' && request.method === 'POST') {
+        if (!manager) return json({ error: 'forbidden' }, 403);
+        let body;
+        try { body = await request.json(); } catch { return json({ error: 'bad_json' }, 400); }
+        const kind = body.kind === 'out' ? 'out' : 'in';
+        const amount = Math.round(Math.max(0, Math.min(1e9, Number(body.amount) || 0)) * 100) / 100;
+        const dueDay = clean(body.dueDay, 10);
+        if (amount <= 0 || !/^\d{4}-\d{2}-\d{2}$/.test(dueDay)) return json({ error: 'bad_fields' }, 400);
+        let party = clean(body.party, 120);
+        let customerId = 0, supplierId = 0;
+        if (kind === 'in' && body.customerId) {
+            const c = await env.POS_DB.prepare('SELECT id, name FROM customers WHERE id = ?').bind(parseInt(body.customerId, 10) || 0).first();
+            if (!c) return json({ error: 'unknown_customer' }, 400);
+            customerId = c.id; party = party || c.name;
+        }
+        if (kind === 'out' && body.supplierId) {
+            const s = await env.POS_DB.prepare('SELECT id, name FROM suppliers WHERE id = ?').bind(parseInt(body.supplierId, 10) || 0).first();
+            if (!s) return json({ error: 'unknown_supplier' }, 400);
+            supplierId = s.id; party = party || s.name;
+        }
+        if (party.length < 2) return json({ error: 'bad_party' }, 400);
+        const r = await env.POS_DB.prepare("INSERT INTO cheques (ts, day, kind, party, customer_id, supplier_id, number, bank, amount, due_day, status, note, staff) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)")
+            .bind(new Date().toISOString(), cairoDay(), kind, party, customerId, supplierId, clean(body.number, 40), clean(body.bank, 60), amount, dueDay, clean(body.note, 300), staff.user).run();
+        return json({ ok: true, id: r.meta.last_row_id });
+    }
+    if (path === '/api/pos/cheques' && request.method === 'GET') {
+        if (!manager) return json({ error: 'forbidden' }, 403);
+        const { results } = await env.POS_DB.prepare("SELECT * FROM cheques ORDER BY CASE status WHEN 'pending' THEN 0 ELSE 1 END, due_day ASC, id DESC LIMIT 300").all();
+        const today = cairoDay();
+        const soon = new Date(Date.now() + 3 * 86400000);
+        let soonDay = today;
+        try { soonDay = new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(soon); } catch {}
+        const pend = (results || []).filter((c) => c.status === 'pending');
+        const sum = (arr) => Math.round(arr.reduce((s, c) => s + c.amount, 0) * 100) / 100;
+        const overdue = pend.filter((c) => c.due_day < today);
+        const dueSoon = pend.filter((c) => c.due_day >= today && c.due_day <= soonDay);
+        return json({
+            cheques: results || [], today,
+            alerts: { overdue: overdue.length, dueSoon: dueSoon.length, count: overdue.length + dueSoon.length },
+            totals: { pendingIn: sum(pend.filter((c) => c.kind === 'in')), pendingOut: sum(pend.filter((c) => c.kind === 'out')) },
+        });
+    }
+    if (path.startsWith('/api/pos/cheque/') && request.method === 'POST' && (path.endsWith('/clear') || path.endsWith('/bounce'))) {
+        if (!manager) return json({ error: 'forbidden' }, 403);
+        const act = path.endsWith('/clear') ? 'clear' : 'bounce';
+        const id = parseInt(path.slice('/api/pos/cheque/'.length, -(act.length + 1)), 10) || 0;
+        const ch = await env.POS_DB.prepare('SELECT * FROM cheques WHERE id = ?').bind(id).first();
+        if (!ch) return json({ error: 'not_found' }, 404);
+        if (ch.status !== 'pending') return json({ error: 'not_pending' }, 400);
+        const ts = new Date().toISOString();
+        const day = cairoDay();
+        const stmts = [];
+        if (act === 'bounce') {
+            stmts.push(env.POS_DB.prepare("UPDATE cheques SET status = 'bounced', done_day = ? WHERE id = ?").bind(day, id));
+        } else {
+            stmts.push(env.POS_DB.prepare("UPDATE cheques SET status = 'cleared', done_day = ? WHERE id = ?").bind(day, id));
+            if (ch.kind === 'in' && ch.customer_id) {
+                stmts.push(env.POS_DB.prepare("INSERT INTO ledger (customer_id, ts, day, kind, amount, invoice_id, staff, note) VALUES (?, ?, ?, 'payment', ?, NULL, ?, ?)")
+                    .bind(ch.customer_id, ts, day, ch.amount, staff.user, 'تحصيل شيك ' + (ch.number || '#' + id)));
+            }
+            if (ch.kind === 'out' && ch.supplier_id) {
+                const sup = await env.POS_DB.prepare('SELECT balance FROM suppliers WHERE id = ?').bind(ch.supplier_id).first();
+                const pay = Math.min(ch.amount, Math.max(0, sup?.balance ?? 0));
+                if (pay > 0) {
+                    stmts.push(env.POS_DB.prepare('UPDATE suppliers SET balance = balance - ? WHERE id = ?').bind(pay, ch.supplier_id));
+                }
+                stmts.push(env.POS_DB.prepare('INSERT INTO supplier_payments (ts, day, supplier_id, amount, staff, note) VALUES (?, ?, ?, ?, ?, ?)').bind(ts, day, ch.supplier_id, ch.amount, staff.user, 'صرف شيك ' + (ch.number || '#' + id)));
+            }
+        }
+        await env.POS_DB.batch(stmts);
+        return json({ ok: true, status: act === 'clear' ? 'cleared' : 'bounced' });
+    }
+    if (path.startsWith('/api/pos/cheque/') && request.method === 'DELETE') {
+        if (!manager) return json({ error: 'forbidden' }, 403);
+        const id = parseInt(path.slice('/api/pos/cheque/'.length), 10) || 0;
+        const ch = await env.POS_DB.prepare('SELECT id, status FROM cheques WHERE id = ?').bind(id).first();
+        if (!ch) return json({ error: 'not_found' }, 404);
+        if (ch.status === 'cleared') return json({ error: 'already_cleared' }, 400);
+        await env.POS_DB.prepare('DELETE FROM cheques WHERE id = ?').bind(id).run();
+        return json({ ok: true });
+    }
+
+    // ---- تقرير الأرباح والتدفق النقدي (مدير فقط) ----
+    if (path === '/api/pos/profit' && request.method === 'GET') {
+        if (!manager) return json({ error: 'forbidden' }, 403);
+        const url = new URL(request.url);
+        const from = clean(url.searchParams.get('from'), 10);
+        const to = clean(url.searchParams.get('to'), 10);
+        if (!from || !to) return json({ error: 'missing_range' }, 400);
+        const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+        const sales = await env.POS_DB.prepare("SELECT COALESCE(SUM(total), 0) AS revenue, COALESCE(SUM(CASE WHEN payment = 'cash' THEN total ELSE 0 END), 0) AS cash, COALESCE(SUM(CASE WHEN payment = 'vcash' THEN total ELSE 0 END), 0) AS vcash, COALESCE(SUM(CASE WHEN payment = 'debt' THEN total ELSE 0 END), 0) AS debt FROM invoices WHERE status = 'completed' AND day >= ? AND day <= ?").bind(from, to).first();
+        const cogs = await env.POS_DB.prepare("SELECT COALESCE(SUM(ii.qty * COALESCE(NULLIF(ii.cost, 0), s.cost, 0)), 0) AS cogs, COALESCE(SUM(CASE WHEN COALESCE(NULLIF(ii.cost, 0), s.cost, 0) = 0 THEN 1 ELSE 0 END), 0) AS nocost FROM invoice_items ii JOIN invoices i ON i.id = ii.invoice_id LEFT JOIN stock s ON s.code = ii.code WHERE i.status = 'completed' AND i.day >= ? AND i.day <= ?").bind(from, to).first();
+        const exp = await env.POS_DB.prepare('SELECT COALESCE(SUM(amount), 0) AS t FROM expenses WHERE day >= ? AND day <= ?').bind(from, to).first();
+        const { results: expByCat } = await env.POS_DB.prepare('SELECT cat, SUM(amount) AS total FROM expenses WHERE day >= ? AND day <= ? GROUP BY cat ORDER BY total DESC').bind(from, to).all();
+        const collected = await env.POS_DB.prepare("SELECT COALESCE(SUM(amount), 0) AS c FROM ledger WHERE kind = 'payment' AND day >= ? AND day <= ?").bind(from, to).first();
+        const chIn = await env.POS_DB.prepare("SELECT COALESCE(SUM(amount), 0) AS c FROM cheques WHERE kind = 'in' AND status = 'cleared' AND customer_id = 0 AND done_day >= ? AND done_day <= ?").bind(from, to).first();
+        const chOut = await env.POS_DB.prepare("SELECT COALESCE(SUM(amount), 0) AS c FROM cheques WHERE kind = 'out' AND status = 'cleared' AND supplier_id = 0 AND done_day >= ? AND done_day <= ?").bind(from, to).first();
+        const purPaid = await env.POS_DB.prepare("SELECT COALESCE(SUM(paid), 0) AS c FROM purchases WHERE status = 'completed' AND day >= ? AND day <= ?").bind(from, to).first();
+        const supPaid = await env.POS_DB.prepare('SELECT COALESCE(SUM(amount), 0) AS c FROM supplier_payments WHERE day >= ? AND day <= ?').bind(from, to).first();
+        const purTotal = await env.POS_DB.prepare("SELECT COALESCE(SUM(total), 0) AS c FROM purchases WHERE status = 'completed' AND day >= ? AND day <= ?").bind(from, to).first();
+        const { results: byDay } = await env.POS_DB.prepare("SELECT day, COUNT(*) AS count, SUM(total) AS revenue FROM invoices WHERE status = 'completed' AND day >= ? AND day <= ? GROUP BY day ORDER BY day DESC LIMIT 62").bind(from, to).all();
+        const pend = await env.POS_DB.prepare("SELECT COALESCE(SUM(CASE WHEN kind = 'in' THEN amount ELSE 0 END), 0) AS cin, COALESCE(SUM(CASE WHEN kind = 'out' THEN amount ELSE 0 END), 0) AS cout FROM cheques WHERE status = 'pending'").first();
+        const supDebt = await env.POS_DB.prepare('SELECT COALESCE(SUM(balance), 0) AS b FROM suppliers').first();
+        const custDebt = await env.POS_DB.prepare("SELECT COALESCE(SUM(CASE WHEN kind = 'charge' THEN amount ELSE -amount END), 0) AS b FROM ledger").first();
+        const revenue = r2(sales?.revenue), cogsV = r2(cogs?.cogs), expenses = r2(exp?.t);
+        const cashIn = r2(r2(sales?.cash) + r2(sales?.vcash) + r2(collected?.c) + r2(chIn?.c));
+        const cashOut = r2(r2(purPaid?.c) + r2(supPaid?.c) + expenses + r2(chOut?.c));
+        return json({
+            from, to,
+            profit: { revenue, cogs: cogsV, gross: r2(revenue - cogsV), expenses, net: r2(revenue - cogsV - expenses), noCostLines: cogs?.nocost ?? 0 },
+            expByCat: expByCat || [],
+            cash: {
+                in: { cash: r2(sales?.cash), vcash: r2(sales?.vcash), debtCollected: r2(collected?.c), cheques: r2(chIn?.c), total: cashIn },
+                out: { purchases: r2(purPaid?.c), supplierPayments: r2(supPaid?.c), expenses, cheques: r2(chOut?.c), total: cashOut },
+                net: r2(cashIn - cashOut),
+            },
+            purchasesTotal: r2(purTotal?.c),
+            byDay: byDay || [],
+            position: { customerDebts: r2(custDebt?.b), supplierDebts: r2(supDebt?.b), chequesIn: r2(pend?.cin), chequesOut: r2(pend?.cout) },
+        });
+    }
+
+    // ---- تصدير Excel/CSV (مدير فقط): بيرجع صفوف جاهزة والواجهة بتبني الملف ----
+    if (path.startsWith('/api/pos/export/') && request.method === 'GET') {
+        if (!manager) return json({ error: 'forbidden' }, 403);
+        const kind = path.slice('/api/pos/export/'.length);
+        const url = new URL(request.url);
+        const from = clean(url.searchParams.get('from'), 10) || '0000-00-00';
+        const to = clean(url.searchParams.get('to'), 10) || '9999-12-31';
+        let headers = [], rows = [];
+        const q = async (sql, ...a) => (await env.POS_DB.prepare(sql).bind(...a).all()).results || [];
+        const PAYAR = { cash: 'كاش', vcash: 'فودافون كاش', debt: 'آجل' };
+        if (kind === 'sales') {
+            headers = ['رقم الفاتورة', 'التاريخ', 'الموظف', 'الدفع', 'العميل', 'كود الصنف', 'الصنف', 'الكمية', 'السعر', 'خصم الصنف', 'إجمالي السطر', 'خصم الفاتورة', 'إجمالي الفاتورة', 'الحالة'];
+            const rs = await q("SELECT i.num, i.day, i.staff, i.payment, i.customer_name, ii.code, ii.name, ii.qty, ii.price, ii.discount AS idisc, ii.line_total, i.discount, i.total, i.status FROM invoices i LEFT JOIN invoice_items ii ON ii.invoice_id = i.id WHERE i.status != 'pending' AND i.day >= ? AND i.day <= ? ORDER BY i.id, ii.rowid", from, to);
+            rows = rs.map((r) => [r.num, r.day, r.staff, PAYAR[r.payment] || r.payment, r.customer_name, r.code, r.name, r.qty, r.price, r.idisc, r.line_total, r.discount, r.total, r.status === 'voided' ? 'ملغاة' : 'تمت']);
+        } else if (kind === 'purchases') {
+            headers = ['رقم الشراء', 'التاريخ', 'المورد', 'كود الصنف', 'الصنف', 'الكمية', 'تكلفة القطعة', 'إجمالي الفاتورة', 'المدفوع', 'الحالة'];
+            const rs = await q("SELECT p.num, p.day, p.supplier_name, pi.code, pi.name, pi.qty, pi.cost, p.total, p.paid, p.status FROM purchases p LEFT JOIN purchase_items pi ON pi.purchase_id = p.id WHERE p.day >= ? AND p.day <= ? ORDER BY p.id, pi.rowid", from, to);
+            rows = rs.map((r) => [r.num, r.day, r.supplier_name, r.code, r.name, r.qty, r.cost, r.total, r.paid, r.status === 'voided' ? 'ملغاة' : 'تمت']);
+        } else if (kind === 'expenses') {
+            headers = ['التاريخ', 'البند', 'التصنيف', 'المبلغ', 'الموظف', 'ملاحظة'];
+            rows = (await q('SELECT day, title, cat, amount, staff, note FROM expenses WHERE day >= ? AND day <= ? ORDER BY id', from, to)).map((r) => [r.day, r.title, r.cat, r.amount, r.staff, r.note]);
+        } else if (kind === 'debts') {
+            headers = ['العميل', 'التليفون', 'المديونية الحالية'];
+            rows = (await q("SELECT c.name, c.phone, COALESCE((SELECT SUM(CASE WHEN l.kind = 'charge' THEN l.amount ELSE -l.amount END) FROM ledger l WHERE l.customer_id = c.id), 0) AS balance FROM customers c ORDER BY balance DESC")).map((r) => [r.name, r.phone, r.balance]);
+        } else if (kind === 'stock') {
+            headers = ['الكود', 'الصنف', 'التصنيف', 'سعر البيع', 'التكلفة', 'الكمية', 'الحد الأدنى', 'قيمة المخزون بالتكلفة'];
+            const prods = await posProducts(env);
+            rows = prods.map((p) => [p.code, p.name, p.cat, p.price, p.cost, p.qty, p.min_qty, Math.round(p.qty * p.cost * 100) / 100]);
+        } else if (kind === 'cheques') {
+            headers = ['النوع', 'الطرف', 'رقم الشيك', 'البنك', 'المبلغ', 'تاريخ الاستحقاق', 'الحالة'];
+            const ST = { pending: 'معلق', cleared: 'اتصرف', bounced: 'مرتجع' };
+            rows = (await q('SELECT kind, party, number, bank, amount, due_day, status FROM cheques ORDER BY due_day')).map((r) => [r.kind === 'in' ? 'وارد من عميل' : 'صادر لمورد', r.party, r.number, r.bank, r.amount, r.due_day, ST[r.status] || r.status]);
+        } else {
+            return json({ error: 'unknown_export' }, 400);
+        }
+        return json({ kind, headers, rows });
     }
 
     // ---- الباركود: المدير بيربط باركود بصنف ----
@@ -891,6 +1055,7 @@ async function createInvoiceCore(env, staffUser, body) {
     const catalog = await getCatalog(env);
     const byCode = new Map(catalog.map((p) => [p.code, p]));
 
+    const costMap = new Map(((await env.POS_DB.prepare('SELECT code, cost FROM stock').all()).results || []).map((r) => [r.code, r.cost || 0]));
     const lines = [];
     for (const it of items) {
         const p = byCode.get(clean(it.code, 40));
@@ -898,7 +1063,7 @@ async function createInvoiceCore(env, staffUser, body) {
         const qty = Math.max(1, Math.min(9999, parseInt(it.qty, 10) || 1));
         const disc = Math.max(0, Math.min(1e9, Number(it.discount) || 0));
         const lineTotal = Math.max(0, Math.round((p.price * qty - disc) * 100) / 100);
-        lines.push({ code: p.code, name: p.name, price: p.price, qty, discount: Math.round(disc * 100) / 100, lineTotal });
+        lines.push({ code: p.code, name: p.name, price: p.price, qty, discount: Math.round(disc * 100) / 100, lineTotal, cost: costMap.get(p.code) || 0 });
     }
     const subtotal = Math.round(lines.reduce((s, l) => s + l.lineTotal, 0) * 100) / 100;
     const invDisc = Math.max(0, Math.min(subtotal, Number(body.discount) || 0));
@@ -918,7 +1083,7 @@ async function createInvoiceCore(env, staffUser, body) {
     const num = 'INV-' + String(invoiceId).padStart(6, '0');
     const ts = new Date().toISOString();
     const day = cairoDay();
-    const itemStmts = lines.map((l) => env.POS_DB.prepare('INSERT INTO invoice_items (invoice_id, code, name, price, qty, discount, line_total) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(invoiceId, l.code, l.name, l.price, l.qty, l.discount, l.lineTotal));
+    const itemStmts = lines.map((l) => env.POS_DB.prepare('INSERT INTO invoice_items (invoice_id, code, name, price, qty, discount, line_total, cost) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').bind(invoiceId, l.code, l.name, l.price, l.qty, l.discount, l.lineTotal, l.cost));
     itemStmts.push(env.POS_DB.prepare("UPDATE invoices SET num = ?, ts = ?, day = ?, staff = ?, payment = ?, subtotal = ?, discount = ?, total = ?, status = 'completed', customer_name = ?, customer_phone = ?, customer_id = ? WHERE id = ?")
         .bind(num, ts, day, staffUser, payment, subtotal, Math.round(invDisc * 100) / 100, total, clean(body.customerName, 120), clean(body.customerPhone, 30), customerId || null, invoiceId));
     if (payment === 'debt') {

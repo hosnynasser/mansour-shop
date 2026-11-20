@@ -103,3 +103,43 @@ export function buildWaText(inv: Invoice, items: InvoiceItem[]): string {
     L.push('📞 ' + SHOP_PHONE);
     return L.join('\n');
 }
+
+export interface Cheque { id: number; ts: string; kind: 'in' | 'out'; party: string; customer_id: number; supplier_id: number; number: string; bank: string; amount: number; due_day: string; status: 'pending' | 'cleared' | 'bounced'; done_day: string; note: string; }
+export interface ProfitReport {
+    from: string; to: string;
+    profit: { revenue: number; cogs: number; gross: number; expenses: number; net: number; noCostLines: number };
+    expByCat: { cat: string; total: number }[];
+    cash: {
+        in: { cash: number; vcash: number; debtCollected: number; cheques: number; total: number };
+        out: { purchases: number; supplierPayments: number; expenses: number; cheques: number; total: number };
+        net: number;
+    };
+    purchasesTotal: number;
+    byDay: { day: string; count: number; revenue: number }[];
+    position: { customerDebts: number; supplierDebts: number; chequesIn: number; chequesOut: number };
+}
+
+// ---- تصدير CSV (بيتفتح في Excel بالعربي) ----
+function csvCell(v: any): string {
+    const s = v === null || v === undefined ? '' : String(v);
+    return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+export function buildCsv(headers: string[], rows: any[][]): string {
+    return '\ufeff' + [headers, ...rows].map((r) => r.map(csvCell).join(',')).join('\r\n');
+}
+export function downloadCsv(filename: string, csv: string) {
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+export async function shareCsv(filename: string, csv: string): Promise<boolean> {
+    try {
+        const file = new File([csv], filename, { type: 'text/csv' });
+        const nav: any = navigator;
+        if (nav.canShare && nav.canShare({ files: [file] })) { await nav.share({ files: [file], title: filename }); return true; }
+    } catch { /* ignored */ }
+    return false;
+}

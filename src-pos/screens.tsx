@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, cairoToday, fmt, fmtTime, paymentLabel, Customer, Expense, Invoice, LedgerEntry, Product, Quote, Report, Role, Staff } from './lib';
 import ScannerModal from './ScannerModal';
+import { ExportCard, ProfitView } from './ReportsExtra';
 
 // ---------- فواتير ----------
 export function InvoicesScreen({ staff, openInvoice, openQuote, notify }: { staff: Staff; openInvoice: (id: number) => void; openQuote: (id: number) => void; notify: (m: string, b?: boolean) => void }) {
@@ -540,6 +541,7 @@ export function ReportsScreen({ notify }: { notify: (m: string, b?: boolean) => 
     const [to, setTo] = useState(today);
     const [rep, setRep] = useState<Report | null>(null);
     const [loading, setLoading] = useState(true);
+    const [rv, setRv] = useState<'sales' | 'profit' | 'cash'>('sales');
 
     const load = async (f: string, t: string) => {
         setLoading(true);
@@ -566,7 +568,13 @@ export function ReportsScreen({ notify }: { notify: (m: string, b?: boolean) => 
                 <div className="field" style={{ flex: 1, marginBottom: 0 }}><label>من</label><input type="date" value={from} onChange={(e) => setFrom(e.target.value)} dir="ltr" style={{ textAlign: 'end' }} /></div>
                 <div className="field" style={{ flex: 1, marginBottom: 0 }}><label>إلى</label><input type="date" value={to} onChange={(e) => setTo(e.target.value)} dir="ltr" style={{ textAlign: 'end' }} /></div>
             </div>
-            {loading || !rep ? <div className="empty">جاري التحميل…</div> : (
+            <div className="pay-toggle" style={{ marginBottom: 12 }}>
+                <button className={rv === 'sales' ? 'on' : ''} onClick={() => setRv('sales')}>📊 المبيعات</button>
+                <button className={rv === 'profit' ? 'on' : ''} onClick={() => setRv('profit')}>📈 الأرباح</button>
+                <button className={rv === 'cash' ? 'on' : ''} onClick={() => setRv('cash')}>💵 الفلوس</button>
+            </div>
+            {rv !== 'sales' ? <ProfitView from={from} to={to} mode={rv} notify={notify} /> : null}
+            {rv !== 'sales' ? null : loading || !rep ? <div className="empty">جاري التحميل…</div> : (
                 <>
                     <div className="close-card">
                         <h4>📊 ملخص المبيعات</h4>
@@ -612,6 +620,7 @@ export function ReportsScreen({ notify }: { notify: (m: string, b?: boolean) => 
                     {rep.summary.count === 0 ? <div className="empty">مفيش مبيعات في الفترة دي</div> : null}
                 </>
             )}
+            <ExportCard from={from} to={to} notify={notify} />
         </>
     );
 }
