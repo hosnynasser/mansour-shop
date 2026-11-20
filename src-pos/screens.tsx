@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, cairoToday, fmt, fmtTime, paymentLabel, Customer, Expense, Invoice, LedgerEntry, Product, Quote, Report, Role, Staff } from './lib';
+import Icon from './Icon';
 import CatChips from './CatChips';
 import ScannerModal from './ScannerModal';
 import { ExportCard, ProfitView } from './ReportsExtra';
@@ -142,12 +143,12 @@ export function StockScreen({ staff, products, categories, refresh, notify }: { 
         <>
             <div className="search-wrap">
                 <div className="search-box">
-                    <span>🔍</span>
+                    <span className="si"><Icon n="search" size={20} /></span>
                     <input placeholder="ابحث بالاسم أو الكود…" value={q} onChange={(e) => setQ(e.target.value)} />
                 </div>
             </div>
             <CatChips categories={categories} sel={catSel} setSel={setCatSel} />
-            {manager ? <button className="btn btn-amber btn-block" style={{ marginBottom: 10 }} onClick={() => setForm({ mode: 'add', name: '', code: '', price: '', cost: '', qty: '', cat: '' })}>➕ إضافة صنف جديد</button> : null}
+            {manager ? <button className="btn btn-amber btn-block" style={{ marginBottom: 10 }} onClick={() => setForm({ mode: 'add', name: '', code: '', price: '', cost: '', qty: '', cat: '' })}><Icon n="plus" size={18} /> إضافة صنف جديد</button> : null}
             {!manager ? <div className="err-box" style={{ background: '#fff8ea', color: 'var(--amber-d)' }}>عرض فقط — تعديل الأرصدة للمدير</div> : null}
             {low.length > 0 ? (
                 <div className="err-box" style={{ background: '#fdecec', color: 'var(--danger)', marginBottom: 10 }}>
@@ -165,14 +166,14 @@ export function StockScreen({ staff, products, categories, refresh, notify }: { 
                         ) : (p.cat ? <span>{p.cat}</span> : null)}
                         {manager ? (
                             <span style={{ display: 'flex', gap: 6, marginTop: 4 }}>
-                                <button className="btn btn-ghost btn-sm" style={{ padding: '2px 10px' }} onClick={() => setForm({ mode: 'edit', name: p.name, code: p.code, price: String(p.price), cost: String((p as any).cost ?? ''), qty: '', cat: '' })}>✏️ تعديل</button>
-                                <button className="btn btn-ghost btn-sm" style={{ padding: '2px 10px', color: 'var(--danger)' }} onClick={() => delProduct(p)}>🗑️</button>
+                                <button className="btn btn-ghost btn-sm" style={{ padding: '2px 10px' }} onClick={() => setForm({ mode: 'edit', name: p.name, code: p.code, price: String(p.price), cost: String((p as any).cost ?? ''), qty: '', cat: '' })}><Icon n="edit" size={15} /> تعديل</button>
+                                <button className="btn btn-ghost btn-sm" style={{ padding: '2px 10px', color: 'var(--danger)' }} onClick={() => delProduct(p)}><Icon n="trash" size={16} /></button>
                             </span>
                         ) : null}
                     </div>
                     {manager ? (
                         <>
-                            <button className="btn btn-ghost btn-sm" onClick={() => setScanFor(p.code)} title="ربط باركود">📷</button>
+                            <button className="btn btn-ghost btn-sm" onClick={() => setScanFor(p.code)} title="ربط باركود"><Icon n="camera" size={18} /></button>
                             <input
                                 inputMode="numeric"
                                 title="الرصيد"
@@ -495,7 +496,7 @@ export function CustomersScreen({ staff, openInvoice, notify }: { staff: Staff; 
         <>
             <div className="search-wrap">
                 <div className="search-box">
-                    <span>🔍</span>
+                    <span className="si"><Icon n="search" size={20} /></span>
                     <input placeholder="ابحث بالاسم أو التليفون…" value={q} onChange={(e) => setQ(e.target.value)} />
                 </div>
             </div>
@@ -504,7 +505,7 @@ export function CustomersScreen({ staff, openInvoice, notify }: { staff: Staff; 
                     <div className="close-line"><span>إجمالي المديونيات القائمة</span><b>{fmt(totalDebt)} ج</b></div>
                 </div>
             ) : null}
-            <button className="btn btn-navy btn-block" style={{ marginBottom: 12 }} onClick={() => setAddOpen(true)}>➕ إضافة عميل</button>
+            <button className="btn btn-navy btn-block" style={{ marginBottom: 12 }} onClick={() => setAddOpen(true)}><Icon n="plus" size={18} /> إضافة عميل</button>
             {loading ? <div className="empty">جاري التحميل…</div> : filtered.length === 0 ? <div className="empty">{list.length === 0 ? 'مفيش عملاء لسه — ضيف أول عميل' : 'مفيش نتايج للبحث'}</div> : filtered.map((c) => (
                 <button key={c.id} className="inv-row" style={{ width: '100%', textAlign: 'start' }} onClick={() => openDetail(c.id)}>
                     <div>

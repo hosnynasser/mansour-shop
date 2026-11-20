@@ -6,6 +6,7 @@ import { CloseScreen, CustomersScreen, InvoicesScreen, ReportsScreen, StaffScree
 import PurchasesScreen from './PurchasesScreen';
 import PrintDoc from './PrintDoc';
 import PayrollHub, { AttendanceStrip } from './PayrollScreen';
+import Icon from './Icon';
 import SharePdf from './SharePdf';
 import logo from '../src/photos/logo-mansour.png';
 
@@ -14,18 +15,18 @@ function SettingsArea({ sub, setSub, staff, manager, chqAlerts, notify, categori
     categories: string[]; products: Product[]; refresh: () => void; onChequesChanged: () => void; onLogout: () => void;
 }) {
     const items: { id: Sub; icon: string; label: string; mgr?: boolean }[] = [
-        { id: 'close', icon: '🧮', label: 'التقفيلة' },
-        { id: 'purchases', icon: '🚚', label: 'المشتريات والموردين والشيكات', mgr: true },
-        { id: 'reports', icon: '📊', label: 'التقارير', mgr: true },
-        { id: 'staff', icon: '👥', label: 'الموظفين والحضور والمرتبات', mgr: true },
-        { id: 'cats', icon: '🏷️', label: 'تصنيفات الأصناف', mgr: true },
+        { id: 'close', icon: 'calc', label: 'التقفيلة' },
+        { id: 'purchases', icon: 'truck', label: 'المشتريات والموردين والشيكات', mgr: true },
+        { id: 'reports', icon: 'chart', label: 'التقارير', mgr: true },
+        { id: 'staff', icon: 'clock', label: 'الموظفين والحضور والمرتبات', mgr: true },
+        { id: 'cats', icon: 'tag', label: 'تصنيفات الأصناف', mgr: true },
     ];
     if (sub !== 'menu') {
         const cur = items.find((i) => i.id === sub);
         return (
             <>
-                <button className="btn btn-ghost btn-sm" style={{ marginBottom: 10 }} onClick={() => setSub('menu')}>← الإعدادات</button>
-                <h3 style={{ margin: '0 0 10px', color: 'var(--navy)' }}>{cur?.icon} {cur?.label}</h3>
+                <button className="btn btn-ghost btn-sm back-btn" onClick={() => setSub('menu')}><Icon n="chev" size={16} /> الإعدادات</button>
+                <h3 className="scr-title"><span className="ico-tile"><Icon n={cur?.icon || 'settings'} size={20} /></span>{cur?.label}</h3>
                 {sub === 'close' ? <CloseScreen staff={staff} notify={notify} /> : null}
                 {sub === 'purchases' && manager ? <PurchasesScreen products={products} refresh={refresh} notify={notify} onChequesChanged={onChequesChanged} /> : null}
                 {sub === 'reports' && manager ? <ReportsScreen notify={notify} /> : null}
@@ -36,20 +37,26 @@ function SettingsArea({ sub, setSub, staff, manager, chqAlerts, notify, categori
     }
     return (
         <>
-            <h3 style={{ margin: '0 0 10px', color: 'var(--navy)' }}>⚙️ الإعدادات</h3>
+            <h3 className="scr-title"><span className="ico-tile"><Icon n="settings" size={20} /></span>الإعدادات</h3>
             <div style={{ border: '1.5px solid var(--line)', borderRadius: 14, overflow: 'hidden', marginBottom: 12, background: '#fff' }}>
                 <div style={{ padding: '8px 14px 0', fontSize: 12, color: 'var(--muted)', fontWeight: 700 }}>حضوري وانصرافي</div>
                 <AttendanceStrip notify={notify} />
             </div>
             <div style={{ display: 'grid', gap: 8 }}>
                 {items.filter((i) => !i.mgr || manager).map((i) => (
-                    <button key={i.id} className="btn btn-ghost btn-block" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 16px', fontSize: 15, textAlign: 'start' }} onClick={() => setSub(i.id)}>
-                        <span>{i.icon} {i.label}</span>
-                        <span>{i.id === 'purchases' && chqAlerts > 0 ? <b style={{ background: 'var(--danger)', color: '#fff', borderRadius: 999, padding: '1px 8px', fontSize: 12, marginInlineEnd: 8 }}>{chqAlerts} شيك</b> : null}‹</span>
+                    <button key={i.id} className="menu-row" onClick={() => setSub(i.id)}>
+                        <span className="ico-tile"><Icon n={i.icon} size={20} /></span>
+                        <span className="ml">{i.label}</span>
+                        {i.id === 'purchases' && chqAlerts > 0 ? <b className="pill-alert">{chqAlerts} شيك</b> : null}
+                        <Icon n="chev" size={18} />
                     </button>
                 ))}
-                <a className="btn btn-ghost btn-block" style={{ display: 'block', padding: '14px 16px', textAlign: 'start', textDecoration: 'none' }} href="https://mansour-shop.pages.dev/" target="_blank" rel="noopener noreferrer">🌐 فتح موقع المحل</a>
-                <button className="btn btn-danger btn-block" style={{ padding: '14px 16px', marginTop: 8 }} onClick={onLogout}>🚪 تسجيل الخروج ({staff.user})</button>
+                <a className="menu-row" href="https://mansour-shop.pages.dev/" target="_blank" rel="noopener noreferrer">
+                    <span className="ico-tile"><Icon n="globe" size={20} /></span>
+                    <span className="ml">فتح موقع المحل</span>
+                    <Icon n="chev" size={18} />
+                </a>
+                <button className="btn btn-danger btn-block" style={{ padding: '14px 16px', marginTop: 8 }} onClick={onLogout}><Icon n="logout" size={18} /> تسجيل الخروج ({staff.user})</button>
             </div>
         </>
     );
@@ -267,11 +274,11 @@ export default function App() {
 
     const manager = staff.role === 'manager';
     const tabs: { id: Tab; label: string; icon: string }[] = [
-        { id: 'sell', label: 'بيع', icon: '🛒' },
-        { id: 'invoices', label: 'فواتير', icon: '🧾' },
-        { id: 'customers', label: 'العملاء', icon: '🤝' },
-        { id: 'stock', label: 'المخزون', icon: '📦' },
-        { id: 'settings', label: 'الإعدادات', icon: '⚙️' },
+        { id: 'sell', label: 'بيع', icon: 'cart' },
+        { id: 'invoices', label: 'فواتير', icon: 'receipt' },
+        { id: 'customers', label: 'العملاء', icon: 'users' },
+        { id: 'stock', label: 'المخزون', icon: 'box' },
+        { id: 'settings', label: 'الإعدادات', icon: 'settings' },
     ];
     const activeDetail = done || detail;
 
@@ -290,6 +297,7 @@ export default function App() {
             </div>
 
             <div className="pos-main">
+              <div className="screen-in" key={tab + (tab === 'settings' ? sub : '')}>
                 {tab === 'sell' ? <SellScreen products={products} categories={categories} onDone={(inv, items) => { setDone({ inv, items }); }} onNeedRefresh={refreshProducts} notify={notify} /> : null}
                 {tab === 'invoices' ? <InvoicesScreen staff={staff} openInvoice={openInvoice} openQuote={openQuote} notify={notify} /> : null}
                 {tab === 'customers' ? <CustomersScreen staff={staff} openInvoice={openInvoice} notify={notify} /> : null}
@@ -300,12 +308,13 @@ export default function App() {
                         onChequesChanged={() => refreshChequeAlerts(false)}
                         onLogout={() => { if (confirm('تسجيل الخروج؟')) { clearCred(); setStaff(null); setTab('sell'); setSub('menu'); } }} />
                 ) : null}
+              </div>
             </div>
 
             <nav className="pos-nav">
                 {tabs.filter((t) => !t.managerOnly || manager).map((t) => (
                     <button key={t.id} className={tab === t.id ? 'on' : ''} onClick={() => { setTab(t.id); setSub('menu'); }}>
-                        <span className="ni" style={{ position: 'relative' }}>{t.icon}{t.id === 'settings' && manager && chqAlerts > 0 ? <i style={{ position: 'absolute', top: -4, insetInlineEnd: -9, background: 'var(--danger)', color: '#fff', borderRadius: 999, fontSize: 10, fontStyle: 'normal', fontWeight: 800, minWidth: 16, height: 16, lineHeight: '16px', textAlign: 'center' }}>{chqAlerts}</i> : null}</span>{t.label}
+                        <span className="ni" style={{ position: 'relative' }}><Icon n={t.icon} size={22} />{t.id === 'settings' && manager && chqAlerts > 0 ? <i style={{ position: 'absolute', top: -4, insetInlineEnd: -9, background: 'var(--danger)', color: '#fff', borderRadius: 999, fontSize: 10, fontStyle: 'normal', fontWeight: 800, minWidth: 16, height: 16, lineHeight: '16px', textAlign: 'center' }}>{chqAlerts}</i> : null}</span>{t.label}
                     </button>
                 ))}
             </nav>

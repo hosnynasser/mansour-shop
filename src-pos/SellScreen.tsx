@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, fmt, CartLine, Customer, Invoice, Product } from './lib';
 import ScannerModal from './ScannerModal';
+import Icon from './Icon';
 import CatChips from './CatChips';
 import { Loyalty } from './LoyaltyUI';
 
@@ -148,7 +149,7 @@ export default function SellScreen({
         <>
             <div className="search-wrap">
                 <div className="search-box">
-                    <span>🔍</span>
+                    <span className="si"><Icon n="search" size={20} /></span>
                     <input
                         ref={searchRef}
                         placeholder="ابحث بالاسم أو الكود…"
@@ -157,7 +158,7 @@ export default function SellScreen({
                         inputMode="search"
                     />
                     {q ? <button className="btn-ghost btn btn-sm" onClick={() => { setQ(''); searchRef.current?.focus(); }}>مسح</button> : null}
-                    <button className="btn btn-navy btn-sm" onClick={() => setScanOpen(true)} title="قارئ الباركود">📷</button>
+                    <button className="btn btn-navy btn-sm" onClick={() => setScanOpen(true)} title="قارئ الباركود"><Icon n="camera" size={18} /></button>
                 </div>
             </div>
 
