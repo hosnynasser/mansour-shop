@@ -423,9 +423,9 @@ html,body{height:100%;overflow:hidden}
 .pe-stock{display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:800;color:var(--navy);grid-column:1 / -1}
 .pe-stock input{width:18px;height:18px}
 .pe-del{align-self:flex-start;background:none;border:none;color:#c0392b;font-weight:800;font-size:13px;cursor:pointer;padding:4px 0}
-.footer-admin{display:inline-block;margin-top:10px;font-size:12px;color:var(--muted);opacity:.75;text-decoration:underline}
+.footer-admin{display:inline-flex;align-items:center;justify-content:center;margin-top:16px;padding:12px 24px;min-height:46px;font-size:14.5px;font-weight:800;color:#fff;background:rgba(255,255,255,.09);border:1.5px solid rgba(255,255,255,.28);border-radius:12px;text-decoration:none;cursor:pointer}
 .admin-body{flex:1;overflow-y:auto}
-button.footer-admin{background:none;border:none;cursor:pointer;font-family:inherit;padding:0}
+button.footer-admin{font-family:inherit}
 
 /* footer clear of fixed bottom nav on mobile */
 @media(max-width:1000px){.footer{padding-bottom:calc(110px + env(safe-area-inset-bottom))}}
