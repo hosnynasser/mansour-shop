@@ -4,9 +4,10 @@ import ScannerModal from './ScannerModal';
 import { Loyalty } from './LoyaltyUI';
 
 export default function SellScreen({
-    products, onDone, onNeedRefresh, notify,
+    products, categories, onDone, onNeedRefresh, notify,
 }: {
     products: Product[];
+    categories: string[];
     onDone: (inv: Invoice, items: { code: string; name: string; price: number; qty: number; discount: number; line_total: number }[]) => void;
     onNeedRefresh: () => void;
     notify: (msg: string, bad?: boolean) => void;
@@ -29,11 +30,16 @@ export default function SellScreen({
     const [redeem, setRedeem] = useState('');
     const searchRef = useRef<HTMLInputElement>(null);
 
+    const [catSel, setCatSel] = useState('');
+    const hasUncat = products.some((p) => !p.cat || !categories.includes(p.cat));
     const filtered = useMemo(() => {
         const s = q.trim().toLowerCase();
-        if (!s) return products;
-        return products.filter((p) => p.name.toLowerCase().includes(s) || p.code.toLowerCase().includes(s));
-    }, [q, products]);
+        return products.filter((p) => {
+            if (catSel === '__none') { if (p.cat && categories.includes(p.cat)) return false; }
+            else if (catSel && p.cat !== catSel) return false;
+            return !s || p.name.toLowerCase().includes(s) || p.code.toLowerCase().includes(s);
+        });
+    }, [q, products, catSel, categories]);
 
     const addLine = (p: Product) => {
         setCart((c) => {
@@ -160,6 +166,14 @@ export default function SellScreen({
                     <button className="btn btn-navy btn-sm" onClick={() => setScanOpen(true)} title="قارئ الباركود">📷</button>
                 </div>
             </div>
+
+            {categories.length > 0 ? (
+                <div className="cat-chips">
+                    <button className={catSel === '' ? 'on' : ''} onClick={() => setCatSel('')}>الكل</button>
+                    {categories.map((c) => <button key={c} className={catSel === c ? 'on' : ''} onClick={() => setCatSel(c)}>{c}</button>)}
+                    {hasUncat ? <button className={catSel === '__none' ? 'on' : ''} onClick={() => setCatSel('__none')}>غير مصنف</button> : null}
+                </div>
+            ) : null}
 
             {filtered.length === 0 ? <div className="empty">مفيش أصناف مطابقة للبحث</div> : (
                 <div className="prod-grid">

@@ -386,7 +386,17 @@ async function posProducts(env) {
     const catalog = await getCatalog(env);
     const { results } = await env.POS_DB.prepare('SELECT code, qty, barcode, cost, min_qty FROM stock').all();
     const info = new Map((results || []).map((r) => [r.code, r]));
-    return catalog.map((p) => ({ name: p.name, code: p.code, price: p.price, cat: p.cat, stock: p.stock !== false, qty: info.get(p.code)?.qty ?? 0, barcode: info.get(p.code)?.barcode || '', cost: info.get(p.code)?.cost ?? 0, min_qty: info.get(p.code)?.min_qty ?? 5 }));
+    const { results: cr } = await env.POS_DB.prepare('SELECT code, cat FROM prod_cat').all();
+    const cmap = new Map((cr || []).map((r) => [r.code, r.cat]));
+    return catalog.map((p) => ({ name: p.name, code: p.code, price: p.price, cat: cmap.has(p.code) ? cmap.get(p.code) : p.cat, stock: p.stock !== false, qty: info.get(p.code)?.qty ?? 0, barcode: info.get(p.code)?.barcode || '', cost: info.get(p.code)?.cost ?? 0, min_qty: info.get(p.code)?.min_qty ?? 5 }));
+}
+
+async function getCategories(env, products) {
+    const r = await env.POS_DB.prepare("SELECT v FROM settings WHERE k = 'categories'").first();
+    let list = null;
+    try { list = r ? JSON.parse(r.v) : null; } catch { list = null; }
+    if (!Array.isArray(list)) list = [...new Set(products.map((p) => p.cat).filter(Boolean))];
+    return list;
 }
 
 async function handlePos(request, env, path) {
@@ -399,7 +409,28 @@ async function handlePos(request, env, path) {
     }
 
     if (path === '/api/pos/products' && request.method === 'GET') {
-        return json({ products: await posProducts(env) });
+        const products = await posProducts(env);
+        return json({ products, categories: await getCategories(env, products) });
+    }
+
+    // تصنيفات الأصناف (مدير فقط للتعديل)
+    if (path === '/api/pos/categories' && request.method === 'POST') {
+        if (!manager) return json({ error: 'forbidden' }, 403);
+        let body;
+        try { body = await request.json(); } catch { return json({ error: 'bad_json' }, 400); }
+        const list = [...new Set((Array.isArray(body.list) ? body.list : []).map((x) => clean(x, 30)).filter(Boolean))].slice(0, 30);
+        await env.POS_DB.prepare("INSERT INTO settings (k, v) VALUES ('categories', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v").bind(JSON.stringify(list)).run();
+        return json({ ok: true, categories: list });
+    }
+    if (path === '/api/pos/product-cat' && request.method === 'POST') {
+        if (!manager) return json({ error: 'forbidden' }, 403);
+        let body;
+        try { body = await request.json(); } catch { return json({ error: 'bad_json' }, 400); }
+        const code = clean(body.code, 40);
+        const cat = clean(body.cat, 30);
+        if (!code) return json({ error: 'bad_fields' }, 400);
+        await env.POS_DB.prepare('INSERT INTO prod_cat (code, cat) VALUES (?, ?) ON CONFLICT(code) DO UPDATE SET cat = excluded.cat').bind(code, cat).run();
+        return json({ ok: true, code, cat });
     }
 
     // ضبط رصيد صنف (مدير فقط)

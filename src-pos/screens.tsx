@@ -64,7 +64,7 @@ export function InvoicesScreen({ staff, openInvoice, openQuote, notify }: { staf
 }
 
 // ---------- المخزون ----------
-export function StockScreen({ staff, products, refresh, notify }: { staff: Staff; products: Product[]; refresh: () => void; notify: (m: string, b?: boolean) => void }) {
+export function StockScreen({ staff, products, categories, refresh, notify }: { staff: Staff; products: Product[]; categories: string[]; refresh: () => void; notify: (m: string, b?: boolean) => void }) {
     const manager = staff.role === 'manager';
     const [q, setQ] = useState('');
     const [edit, setEdit] = useState<Record<string, string>>({});
@@ -80,7 +80,11 @@ export function StockScreen({ staff, products, refresh, notify }: { staff: Staff
         } catch { notify('مشكلة في حفظ الباركود', true); }
     };
     const s = q.trim().toLowerCase();
-    const filtered = s ? products.filter((p) => p.name.toLowerCase().includes(s) || p.code.toLowerCase().includes(s)) : products;
+    const [catSel, setCatSel] = useState('');
+    const filtered = products.filter((p) => (!catSel || p.cat === catSel) && (!s || p.name.toLowerCase().includes(s) || p.code.toLowerCase().includes(s)));
+    const setCat = async (code: string, cat: string) => {
+        try { await api('/api/pos/product-cat', 'POST', { code, cat }); refresh(); notify('اتغير التصنيف ✓'); } catch { notify('مشكلة في حفظ التصنيف', true); }
+    };
 
     const [minEdit, setMinEdit] = useState<Record<string, string>>({});
     const save = async (code: string) => {
@@ -114,6 +118,12 @@ export function StockScreen({ staff, products, refresh, notify }: { staff: Staff
                     <input placeholder="ابحث بالاسم أو الكود…" value={q} onChange={(e) => setQ(e.target.value)} />
                 </div>
             </div>
+            {categories.length > 0 ? (
+                <div className="cat-chips">
+                    <button className={catSel === '' ? 'on' : ''} onClick={() => setCatSel('')}>الكل</button>
+                    {categories.map((c) => <button key={c} className={catSel === c ? 'on' : ''} onClick={() => setCatSel(c)}>{c}</button>)}
+                </div>
+            ) : null}
             {!manager ? <div className="err-box" style={{ background: '#fff8ea', color: 'var(--amber-d)' }}>عرض فقط — تعديل الأرصدة للمدير</div> : null}
             {low.length > 0 ? (
                 <div className="err-box" style={{ background: '#fdecec', color: 'var(--danger)', marginBottom: 10 }}>
@@ -122,7 +132,14 @@ export function StockScreen({ staff, products, refresh, notify }: { staff: Staff
             ) : null}
             {filtered.map((p) => (
                 <div className="stock-row" key={p.code}>
-                    <div className="sn">{p.name}<span>{p.code}{(p as any).barcode ? ' · 🏷️ ' + (p as any).barcode : ''}</span></div>
+                    <div className="sn">{p.name}<span>{p.code}{(p as any).barcode ? ' · 🏷️ ' + (p as any).barcode : ''}</span>
+                        {manager && categories.length > 0 ? (
+                            <select className="cat-sel" value={categories.includes(p.cat) ? p.cat : ''} onChange={(e) => setCat(p.code, e.target.value)}>
+                                <option value="">— بدون تصنيف —</option>
+                                {categories.map((c) => <option key={c} value={c}>{c}</option>)}
+                            </select>
+                        ) : (p.cat ? <span>{p.cat}</span> : null)}
+                    </div>
                     {manager ? (
                         <>
                             <button className="btn btn-ghost btn-sm" onClick={() => setScanFor(p.code)} title="ربط باركود">📷</button>

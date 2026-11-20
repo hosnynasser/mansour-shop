@@ -168,3 +168,9 @@ body.printing .print-area{display:block !important}
 .print-r80 .rt{text-align:center;border-top:1px dashed #000;margin-top:6px;padding-top:6px;font-size:14px;font-weight:800}
 .print-r80 .rf{text-align:center;font-size:10px;margin-top:8px;border-top:1px dashed #000;padding-top:6px}
 @media (max-width:480px){.prod-grid{grid-template-columns:1fr 1fr}}
+
+.cat-chips{display:flex;gap:8px;overflow-x:auto;padding:2px 0 10px;scrollbar-width:none}
+.cat-chips::-webkit-scrollbar{display:none}
+.cat-chips button{flex:none;border:1.5px solid var(--line);background:#fff;color:var(--navy);border-radius:999px;padding:7px 16px;font-size:14px;font-weight:700}
+.cat-chips button.on{background:var(--navy);color:#fff;border-color:var(--navy)}
+.cat-sel{display:block;margin-top:4px;font-size:12px;padding:3px 6px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--navy)}

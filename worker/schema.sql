@@ -152,3 +152,6 @@ CREATE INDEX IF NOT EXISTS idx_att_day ON attendance(day);
 CREATE TABLE IF NOT EXISTS pay_rates (user TEXT PRIMARY KEY, kind TEXT DEFAULT 'month', rate REAL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS pay_advances (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, day TEXT, user TEXT, amount REAL, note TEXT DEFAULT '', staff TEXT);
 CREATE TABLE IF NOT EXISTS pay_runs (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, day TEXT, user TEXT, month TEXT, amount REAL, staff TEXT);
+
+-- stage 4 batch 4
+CREATE TABLE IF NOT EXISTS prod_cat (code TEXT PRIMARY KEY, cat TEXT);

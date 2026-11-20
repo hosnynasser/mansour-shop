@@ -9,6 +9,84 @@ import PayrollHub, { AttendanceStrip } from './PayrollScreen';
 import SharePdf from './SharePdf';
 import logo from '../src/photos/logo-mansour.png';
 
+function SettingsArea({ sub, setSub, staff, manager, chqAlerts, notify, categories, products, refresh, onChequesChanged, onLogout }: {
+    sub: Sub; setSub: (s: Sub) => void; staff: Staff; manager: boolean; chqAlerts: number; notify: (m: string, b?: boolean) => void;
+    categories: string[]; products: Product[]; refresh: () => void; onChequesChanged: () => void; onLogout: () => void;
+}) {
+    const items: { id: Sub; icon: string; label: string; mgr?: boolean }[] = [
+        { id: 'close', icon: '🧮', label: 'التقفيلة' },
+        { id: 'purchases', icon: '🚚', label: 'المشتريات والموردين والشيكات', mgr: true },
+        { id: 'reports', icon: '📊', label: 'التقارير', mgr: true },
+        { id: 'staff', icon: '👥', label: 'الموظفين والحضور والمرتبات', mgr: true },
+        { id: 'cats', icon: '🏷️', label: 'تصنيفات الأصناف', mgr: true },
+    ];
+    if (sub !== 'menu') {
+        const cur = items.find((i) => i.id === sub);
+        return (
+            <>
+                <button className="btn btn-ghost btn-sm" style={{ marginBottom: 10 }} onClick={() => setSub('menu')}>← الإعدادات</button>
+                <h3 style={{ margin: '0 0 10px', color: 'var(--navy)' }}>{cur?.icon} {cur?.label}</h3>
+                {sub === 'close' ? <CloseScreen staff={staff} notify={notify} /> : null}
+                {sub === 'purchases' && manager ? <PurchasesScreen products={products} refresh={refresh} notify={notify} onChequesChanged={onChequesChanged} /> : null}
+                {sub === 'reports' && manager ? <ReportsScreen notify={notify} /> : null}
+                {sub === 'staff' && manager ? <StaffHub me={staff} notify={notify} /> : null}
+                {sub === 'cats' && manager ? <CategoriesScreen categories={categories} products={products} refresh={refresh} notify={notify} /> : null}
+            </>
+        );
+    }
+    return (
+        <>
+            <h3 style={{ margin: '0 0 10px', color: 'var(--navy)' }}>⚙️ الإعدادات</h3>
+            <div style={{ border: '1.5px solid var(--line)', borderRadius: 14, overflow: 'hidden', marginBottom: 12, background: '#fff' }}>
+                <div style={{ padding: '8px 14px 0', fontSize: 12, color: 'var(--muted)', fontWeight: 700 }}>حضوري وانصرافي</div>
+                <AttendanceStrip notify={notify} />
+            </div>
+            <div style={{ display: 'grid', gap: 8 }}>
+                {items.filter((i) => !i.mgr || manager).map((i) => (
+                    <button key={i.id} className="btn btn-ghost btn-block" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 16px', fontSize: 15, textAlign: 'start' }} onClick={() => setSub(i.id)}>
+                        <span>{i.icon} {i.label}</span>
+                        <span>{i.id === 'purchases' && chqAlerts > 0 ? <b style={{ background: 'var(--danger)', color: '#fff', borderRadius: 999, padding: '1px 8px', fontSize: 12, marginInlineEnd: 8 }}>{chqAlerts} شيك</b> : null}‹</span>
+                    </button>
+                ))}
+                <button className="btn btn-danger btn-block" style={{ padding: '14px 16px', marginTop: 8 }} onClick={onLogout}>🚪 تسجيل الخروج ({staff.user})</button>
+            </div>
+        </>
+    );
+}
+
+function CategoriesScreen({ categories, products, refresh, notify }: { categories: string[]; products: Product[]; refresh: () => void; notify: (m: string, b?: boolean) => void }) {
+    const [name, setName] = useState('');
+    const save = async (list: string[]) => {
+        try { await api('/api/pos/categories', 'POST', { list }); refresh(); notify('اتحفظت التصنيفات ✓'); } catch { notify('مشكلة في الحفظ', true); }
+    };
+    const add = () => {
+        const n = name.trim();
+        if (!n) return;
+        if (categories.includes(n)) { notify('التصنيف موجود', true); return; }
+        setName(''); save([...categories, n]);
+    };
+    const del = (c: string) => {
+        const n = products.filter((p) => p.cat === c).length;
+        if (!confirm(n ? `التصنيف "${c}" فيه ${n} صنف — هيفضلوا موجودين بدون تصنيف. تمسحه؟` : `مسح "${c}"؟`)) return;
+        save(categories.filter((x) => x !== c));
+    };
+    return (
+        <>
+            <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 10 }}>ضيف تصنيفات (زي كهربا، صحي، عدد) وبعدين حدد تصنيف كل صنف من شاشة المخزون.</div>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                <input className="in" style={{ flex: 1, padding: 10, border: '1.5px solid var(--line)', borderRadius: 10, fontSize: 15 }} placeholder="اسم تصنيف جديد" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') add(); }} />
+                <button className="btn btn-amber" onClick={add}>➕ إضافة</button>
+            </div>
+            {categories.map((c) => (
+                <div className="close-line" key={c}>
+                    <span>{c} · {products.filter((p) => p.cat === c).length} صنف</span>
+                    <button className="btn btn-ghost btn-sm" onClick={() => del(c)}>مسح</button>
+                </div>
+            ))}
+        </>
+    );
+}
+
 function StaffHub({ me, notify }: { me: Staff; notify: (m: string, b?: boolean) => void }) {
     const [v, setV] = useState<'acc' | 'pay'>('acc');
     const [names, setNames] = useState<string[]>([]);
@@ -24,12 +102,15 @@ function StaffHub({ me, notify }: { me: Staff; notify: (m: string, b?: boolean) 
     );
 }
 
-type Tab = 'sell' | 'invoices' | 'customers' | 'stock' | 'purchases' | 'close' | 'reports' | 'staff';
+type Tab = 'sell' | 'invoices' | 'customers' | 'stock' | 'settings';
+type Sub = 'menu' | 'purchases' | 'close' | 'reports' | 'staff' | 'cats';
 
 export default function App() {
     const [staff, setStaff] = useState<Staff | null>(null);
     const [booting, setBooting] = useState(true);
     const [tab, setTab] = useState<Tab>('sell');
+    const [sub, setSub] = useState<Sub>('menu');
+    const [categories, setCategories] = useState<string[]>([]);
     const [products, setProducts] = useState<Product[]>([]);
     const [toast, setToast] = useState<{ msg: string; bad: boolean } | null>(null);
     const [done, setDone] = useState<{ inv: Invoice; items: InvoiceItem[] } | null>(null);
@@ -48,7 +129,7 @@ export default function App() {
     }, []);
 
     const refreshProducts = useCallback(async () => {
-        try { const r = await api('/api/pos/products'); setProducts(r.products || []); } catch {}
+        try { const r = await api('/api/pos/products'); setProducts(r.products || []); setCategories(r.categories || []); } catch {}
     }, []);
 
     const refreshChequeAlerts = useCallback(async (announce = false) => {
@@ -184,15 +265,12 @@ export default function App() {
     if (!staff) return <Login onLogin={(s) => { setStaff(s); refreshProducts(); }} />;
 
     const manager = staff.role === 'manager';
-    const tabs: { id: Tab; label: string; icon: string; managerOnly?: boolean }[] = [
+    const tabs: { id: Tab; label: string; icon: string }[] = [
         { id: 'sell', label: 'بيع', icon: '🛒' },
         { id: 'invoices', label: 'فواتير', icon: '🧾' },
         { id: 'customers', label: 'العملاء', icon: '🤝' },
         { id: 'stock', label: 'المخزون', icon: '📦' },
-        { id: 'purchases', label: 'المشتريات', icon: '🚚', managerOnly: true },
-        { id: 'close', label: 'التقفيلة', icon: '🧮' },
-        { id: 'reports', label: 'التقارير', icon: '📊', managerOnly: true },
-        { id: 'staff', label: 'الموظفين', icon: '👥', managerOnly: true },
+        { id: 'settings', label: 'الإعدادات', icon: '⚙️' },
     ];
     const activeDetail = done || detail;
 
@@ -206,28 +284,27 @@ export default function App() {
                 </div>
                 <div className="who">
                     <b>{staff.user}</b>
-                    {manager ? 'مدير' : 'كاشير'} ·{' '}
-                    <a href="#" style={{ textDecoration: 'underline' }} onClick={(e) => { e.preventDefault(); clearCred(); setStaff(null); }}>خروج</a>
+                    {manager ? 'مدير' : 'كاشير'}
                 </div>
             </div>
 
-            <AttendanceStrip notify={notify} />
-
             <div className="pos-main">
-                {tab === 'sell' ? <SellScreen products={products} onDone={(inv, items) => { setDone({ inv, items }); }} onNeedRefresh={refreshProducts} notify={notify} /> : null}
+                {tab === 'sell' ? <SellScreen products={products} categories={categories} onDone={(inv, items) => { setDone({ inv, items }); }} onNeedRefresh={refreshProducts} notify={notify} /> : null}
                 {tab === 'invoices' ? <InvoicesScreen staff={staff} openInvoice={openInvoice} openQuote={openQuote} notify={notify} /> : null}
                 {tab === 'customers' ? <CustomersScreen staff={staff} openInvoice={openInvoice} notify={notify} /> : null}
-                {tab === 'stock' ? <StockScreen staff={staff} products={products} refresh={refreshProducts} notify={notify} /> : null}
-                {tab === 'purchases' && manager ? <PurchasesScreen products={products} refresh={refreshProducts} notify={notify} onChequesChanged={() => refreshChequeAlerts(false)} /> : null}
-                {tab === 'close' ? <CloseScreen staff={staff} notify={notify} /> : null}
-                {tab === 'reports' && manager ? <ReportsScreen notify={notify} /> : null}
-                {tab === 'staff' && manager ? <StaffHub me={staff} notify={notify} /> : null}
+                {tab === 'stock' ? <StockScreen staff={staff} products={products} categories={categories} refresh={refreshProducts} notify={notify} /> : null}
+                {tab === 'settings' ? (
+                    <SettingsArea sub={sub} setSub={setSub} staff={staff} manager={manager} chqAlerts={chqAlerts} notify={notify}
+                        categories={categories} products={products} refresh={refreshProducts}
+                        onChequesChanged={() => refreshChequeAlerts(false)}
+                        onLogout={() => { if (confirm('تسجيل الخروج؟')) { clearCred(); setStaff(null); setTab('sell'); setSub('menu'); } }} />
+                ) : null}
             </div>
 
             <nav className="pos-nav">
                 {tabs.filter((t) => !t.managerOnly || manager).map((t) => (
-                    <button key={t.id} className={tab === t.id ? 'on' : ''} onClick={() => setTab(t.id)}>
-                        <span className="ni" style={{ position: 'relative' }}>{t.icon}{t.id === 'purchases' && chqAlerts > 0 ? <i style={{ position: 'absolute', top: -4, insetInlineEnd: -9, background: 'var(--danger)', color: '#fff', borderRadius: 999, fontSize: 10, fontStyle: 'normal', fontWeight: 800, minWidth: 16, height: 16, lineHeight: '16px', textAlign: 'center' }}>{chqAlerts}</i> : null}</span>{t.label}
+                    <button key={t.id} className={tab === t.id ? 'on' : ''} onClick={() => { setTab(t.id); setSub('menu'); }}>
+                        <span className="ni" style={{ position: 'relative' }}>{t.icon}{t.id === 'settings' && manager && chqAlerts > 0 ? <i style={{ position: 'absolute', top: -4, insetInlineEnd: -9, background: 'var(--danger)', color: '#fff', borderRadius: 999, fontSize: 10, fontStyle: 'normal', fontWeight: 800, minWidth: 16, height: 16, lineHeight: '16px', textAlign: 'center' }}>{chqAlerts}</i> : null}</span>{t.label}
                     </button>
                 ))}
             </nav>
