@@ -270,7 +270,6 @@ function Home() {
                     <small className="rev-role">عميل</small>
                 </div>)}
             </div>
-            <p className="rev-note">نماذج آراء مؤقتة لحين إضافة آراء العملاء الحقيقية.</p>
         </section>
 
         <ContactSection />
@@ -337,14 +336,12 @@ function scrollTopSoon() {
 function ProductCard({ p, onOpen }: { p: Product; onOpen: (p: Product) => void }) {
     const { add } = useCart();
     const [qty, setQtyLocal] = useState(1);
-    const hasRealImg = !!(p.images && p.images.length) || !!p.imgUrl;
     const out = p.stock === false;
     return <article className={'product-card' + (out ? ' out-of-stock' : '')}>
         <button type="button" className="product-main" onClick={() => onOpen(p)} aria-label={'تفاصيل ' + p.name}>
             <div className={'product-art ' + (p.cat === 'كهرباء' ? 'cat-el' : 'cat-pl')}>
                 <img src={p.img} alt={p.alt} loading="lazy" />
                 <small className="product-category">{p.cat}</small>
-                {!hasRealImg && <small className="product-temp">صورة مؤقتة</small>}
                 {out && <span className="stock-badge out">غير متوفر</span>}
             </div>
             <div className="product-info"><h3>{p.name}</h3><p>{p.desc} · كود {p.code}</p></div>
@@ -1078,7 +1075,6 @@ export function App() {
                         <p>{shop.legalName}</p>
                         <FooterPhones />
                         <small>© 2026 MANSOUR. جميع الحقوق محفوظة.</small>
-                        <small>نسخة للمراجعة: الصور والأسعار والأكواد استرشادية.</small>
                         <button type="button" className="footer-admin" onClick={() => setAdminOpen(true)}>لوحة التحكم</button>
                     </footer>
                 </main>
