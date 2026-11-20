@@ -321,7 +321,6 @@ export default function App() {
                                 <h2>تم تسجيل البيع</h2>
                                 <div className="no">{done.inv.num} · {paymentLabel(done.inv.payment)}</div>
                                 <div className="tt">{fmt(done.inv.total)} ج</div>
-                                {done.inv.pointsEarned ? <div style={{ fontSize: 13, color: 'var(--amber-d)', fontWeight: 700 }}>⭐ كسب {done.inv.pointsEarned} نقطة · رصيده {done.inv.pointsBalance} نقطة</div> : null}
                             </div>
                             <div style={{ display: 'grid', gap: 8 }}>
                                 <button className="btn btn-blue btn-block" onClick={() => setPrintJob({ ...done, mode: 'r80' })}>🖨️ طباعة إيصال (80مم)</button>
