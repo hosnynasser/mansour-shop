@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import PN from './Bidi';
 import { api, cget, cset, cairoToday, fmt, fmtTime, paymentLabel, Customer, Expense, Invoice, LedgerEntry, Product, Quote, Report, Role, Staff } from './lib';
 import Icon from './Icon';
@@ -6,6 +6,18 @@ import CatChips from './CatChips';
 import ScannerModal from './ScannerModal';
 import { ExportCard, ProfitView } from './ReportsExtra';
 import { Loyalty } from './LoyaltyUI';
+
+// تحميل تدريجي: بيعرض أول 40 وبيزود لما المستخدم ينزل
+function MoreSentinel({ shown, total, more }: { shown: number; total: number; more: () => void }) {
+    const ref = useRef<HTMLDivElement | null>(null);
+    useEffect(() => {
+        const el = ref.current; if (!el || shown >= total) return;
+        const io = new IntersectionObserver((en) => { if (en[0].isIntersecting) more(); }, { rootMargin: '400px' });
+        io.observe(el); return () => io.disconnect();
+    });
+    return shown < total ? <div ref={ref} className="empty" style={{ padding: 12 }}>…</div> : null;
+}
+const PAGE_N = 40;
 
 // ---------- فواتير ----------
 export function InvoicesScreen({ staff, openInvoice, openQuote, notify }: { staff: Staff; openInvoice: (id: number) => void; openQuote: (id: number) => void; notify: (m: string, b?: boolean) => void }) {
@@ -109,8 +121,12 @@ export function StockScreen({ staff, products, categories, refresh, notify }: { 
             notify('اتربط الباركود بالصنف ✓');
         } catch { notify('مشكلة في حفظ الباركود', true); }
     };
-    const s = q.trim().toLowerCase();
+    const dq = useDeferredValue(q);
+    const s = dq.trim().toLowerCase();
     const [catSel, setCatSel] = useState('');
+    const [shown, setShown] = useState(PAGE_N);
+    useEffect(() => { setShown(PAGE_N); }, [s, catSel]);
+    const idx = useMemo(() => products.map((p) => (p.name + ' ' + p.code).toLowerCase()), [products]);
     const [form, setForm] = useState<{ mode: 'add' | 'edit'; name: string; code: string; price: string; cost: string; qty: string; cat: string } | null>(null);
     const [fBusy, setFBusy] = useState(false);
     const submitForm = async () => {
@@ -138,7 +154,7 @@ export function StockScreen({ staff, products, categories, refresh, notify }: { 
             notify(r.hidden ? 'اتخفى الصنف (له فواتير قديمة) ✓' : 'اتمسح الصنف ✓'); refresh();
         } catch { notify('مشكلة في المسح', true); }
     };
-    const filtered = products.filter((p) => (!catSel || p.cat === catSel) && (!s || p.name.toLowerCase().includes(s) || p.code.toLowerCase().includes(s)));
+    const filtered = useMemo(() => products.filter((p, i) => (!catSel || p.cat === catSel) && (!s || idx[i].includes(s))), [products, idx, catSel, s]);
     const setCat = async (code: string, cat: string) => {
         try { await api('/api/pos/product-cat', 'POST', { code, cat }); refresh(); notify('اتغير التصنيف ✓'); } catch { notify('مشكلة في حفظ التصنيف', true); }
     };
@@ -165,7 +181,7 @@ export function StockScreen({ staff, products, categories, refresh, notify }: { 
         }
         setBusy('');
     };
-    const low = products.filter((p) => p.qty <= ((p as any).min_qty ?? 5));
+    const low = useMemo(() => products.filter((p) => p.qty <= ((p as any).min_qty ?? 5)), [products]);
 
     return (
         <>
@@ -180,10 +196,10 @@ export function StockScreen({ staff, products, categories, refresh, notify }: { 
             {!manager ? <div className="err-box" style={{ background: '#fff8ea', color: 'var(--amber-d)' }}>عرض فقط — تعديل الأرصدة للمدير</div> : null}
             {low.length > 0 ? (
                 <div className="err-box" style={{ background: '#fdecec', color: 'var(--danger)', marginBottom: 10 }}>
-                    ⚠️ نواقص المخزون ({low.length}): {low.map((p) => p.name + ' (' + p.qty + ')').join('، ')}
+                    ⚠️ نواقص المخزون ({low.length}): {low.slice(0, 8).map((p) => p.name + ' (' + p.qty + ')').join('، ')}{low.length > 8 ? ' … و' + (low.length - 8) + ' صنف تاني' : ''}
                 </div>
             ) : null}
-            {filtered.map((p) => (
+            {filtered.slice(0, shown).map((p) => (
                 <div className="stock-row" key={p.code}>
                     <div className="sn"><PN t={p.name} /><span>{p.code}{(p as any).barcode ? ' · 🏷️ ' + (p as any).barcode : ''}</span>
                         {manager && categories.length > 0 ? (
@@ -224,6 +240,7 @@ export function StockScreen({ staff, products, categories, refresh, notify }: { 
                     )}
                 </div>
             ))}
+            <MoreSentinel shown={shown} total={filtered.length} more={() => setShown((n) => n + PAGE_N)} />
             {form ? (
                 <>
                     <div className="sheet-back" onClick={() => setForm(null)} />
@@ -456,9 +473,10 @@ export function CustomersScreen({ staff, openInvoice, notify }: { staff: Staff; 
     const [payMethod, setPayMethod] = useState<'cash' | 'vcash'>('cash');
     const [editMode, setEditMode] = useState(false);
 
+    const [shown, setShown] = useState(PAGE_N);
     const load = async () => {
-        setLoading(true);
-        try { const r = await api('/api/pos/customers'); setList(r.customers || []); } catch { notify('مشكلة في تحميل العملاء', true); }
+        const c = cget<Customer[]>('customers'); if (c && !list.length) { setList(c); setLoading(false); } else if (!c) setLoading(true);
+        try { const r = await api('/api/pos/customers'); setList(r.customers || []); cset('customers', r.customers || []); } catch { notify('مشكلة في تحميل العملاء', true); }
         setLoading(false);
     };
     useEffect(() => { load(); }, []);
@@ -516,9 +534,11 @@ export function CustomersScreen({ staff, openInvoice, notify }: { staff: Staff; 
         catch { notify('مشكلة في المسح', true); }
     };
 
-    const s = q.trim().toLowerCase();
-    const filtered = s ? list.filter((c) => c.name.toLowerCase().includes(s) || c.phone.includes(s)) : list;
-    const totalDebt = list.reduce((a, c) => a + (c.balance || 0), 0);
+    const dq = useDeferredValue(q);
+    const s = dq.trim().toLowerCase();
+    useEffect(() => { setShown(PAGE_N); }, [s]);
+    const filtered = useMemo(() => (s ? list.filter((c) => c.name.toLowerCase().includes(s) || (c.phone || '').includes(s)) : list), [list, s]);
+    const totalDebt = useMemo(() => list.reduce((a, c) => a + (c.balance || 0), 0), [list]);
 
     return (
         <>
@@ -534,7 +554,7 @@ export function CustomersScreen({ staff, openInvoice, notify }: { staff: Staff; 
                 </div>
             ) : null}
             <button className="btn btn-navy btn-block" style={{ marginBottom: 12 }} onClick={() => setAddOpen(true)}><Icon n="plus" size={18} /> إضافة عميل</button>
-            {loading ? <div className="empty">جاري التحميل…</div> : filtered.length === 0 ? <div className="empty">{list.length === 0 ? 'مفيش عملاء لسه — ضيف أول عميل' : 'مفيش نتايج للبحث'}</div> : filtered.map((c) => (
+            {loading ? <div className="empty">جاري التحميل…</div> : filtered.length === 0 ? <div className="empty">{list.length === 0 ? 'مفيش عملاء لسه — ضيف أول عميل' : 'مفيش نتايج للبحث'}</div> : filtered.slice(0, shown).map((c) => (
                 <button key={c.id} className="inv-row" style={{ width: '100%', textAlign: 'start' }} onClick={() => openDetail(c.id)}>
                     <div>
                         <div className="n">{c.name}</div>
@@ -545,6 +565,7 @@ export function CustomersScreen({ staff, openInvoice, notify }: { staff: Staff; 
                     </span>
                 </button>
             ))}
+            <MoreSentinel shown={shown} total={filtered.length} more={() => setShown((n) => n + PAGE_N)} />
 
             {addOpen ? (
                 <>
