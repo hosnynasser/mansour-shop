@@ -46,17 +46,26 @@ async function getAdmins(env) {
 }
 
 // يرجع {user, role} أو null. role: 'manager' | 'cashier' — الحسابات القديمة من غير role تعتبر مدير
+async function getOwner(env) {
+    try { return (await env.POS_DB.prepare('SELECT user, hash FROM owner_cred WHERE id = 1').first()) || null; } catch { return null; }
+}
+
 async function staffAuth(request, env) {
     const h = request.headers.get('X-Admin-Code') || '';
     if (!h) return null;
-    if (env.ADMIN_CODE && h === env.ADMIN_CODE) return { user: 'master', role: 'manager' };
+    const owner = await getOwner(env);
     const i = h.indexOf(':');
+    if (owner) {
+        // لما المدير يغيّر بياناته من الإعدادات، الكود الرئيسي القديم بيتعطل
+        if (i > 0 && clean(h.slice(0, i), 40) === owner.user && (await sha256(h.slice(i + 1).slice(0, 100))) === owner.hash) return { user: owner.user, role: 'manager', root: true };
+    } else {
+        if (env.ADMIN_CODE && h === env.ADMIN_CODE) return { user: 'master', role: 'manager', root: true };
+        if (i > 0 && env.ADMIN_CODE && h.slice(i + 1).slice(0, 100) === env.ADMIN_CODE && clean(h.slice(0, i), 40)) return { user: clean(h.slice(0, i), 40), role: 'manager', root: true };
+    }
     if (i > 0) {
         const user = clean(h.slice(0, i), 40);
         const pass = h.slice(i + 1).slice(0, 100);
         if (!user || !pass) return null;
-        // الكود الرئيسي كباسورد مع أي اسم مستخدم = مدير
-        if (env.ADMIN_CODE && pass === env.ADMIN_CODE) return { user, role: 'manager' };
         const hash = await sha256(pass);
         const admins = await getAdmins(env);
         const a = admins.find((x) => x.user === user && x.hash === hash);
@@ -118,6 +127,7 @@ function sanitizeProduct(p) {
         imgUrl: typeof p.imgUrl === 'string' && /^https:\/\//.test(p.imgUrl) ? p.imgUrl.slice(0, 500) : '',
         images,
         video: okMediaRef(p.video) ? p.video : '',
+        ...(p.hidden === true ? { hidden: true } : {}),
     };
 }
 
@@ -151,11 +161,43 @@ async function handle(request, env) {
 
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
 
+    // ---- تغيير بيانات دخول المستخدم الحالي (موقع + كاشير بيستخدموا نفس الدخول) ----
+    if (path === '/api/account/change' && request.method === 'POST') {
+        const me = await staffAuth(request, env);
+        if (!me) return json({ error: 'unauthorized' }, 401);
+        let body;
+        try { body = await request.json(); } catch { return json({ error: 'bad_json' }, 400); }
+        const h = request.headers.get('X-Admin-Code') || '';
+        const curPass = (env.ADMIN_CODE && h === env.ADMIN_CODE) ? h : (h.indexOf(':') > 0 ? h.slice(h.indexOf(':') + 1).slice(0, 100) : h);
+        if (String(body.current ?? '') !== curPass) return json({ error: 'wrong_current' }, 403);
+        const newUser = clean(body.newUser, 40) || (me.user === 'master' ? '' : me.user);
+        const newPass = String(body.newPass ?? '');
+        if (newUser.length < 3 || newUser.includes(':')) return json({ error: 'bad_user' }, 400);
+        if (newPass && (newPass.length < 6 || newPass.length > 100)) return json({ error: 'bad_pass' }, 400);
+        const admins = await getAdmins(env);
+        if (me.root) {
+            if (admins.some((x) => x.user === newUser)) return json({ error: 'user_exists' }, 400);
+            const owner = await getOwner(env);
+            if (!owner && !newPass) return json({ error: 'need_pass' }, 400);
+            const hash = newPass ? await sha256(newPass) : owner.hash;
+            await env.POS_DB.prepare('CREATE TABLE IF NOT EXISTS owner_cred (id INTEGER PRIMARY KEY, user TEXT NOT NULL, hash TEXT NOT NULL)').run();
+            await env.POS_DB.prepare('INSERT INTO owner_cred (id, user, hash) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET user = excluded.user, hash = excluded.hash').bind(newUser, hash).run();
+            return json({ ok: true, user: newUser, cred: newUser + ':' + (newPass || curPass) });
+        }
+        const a = admins.find((x) => x.user === me.user);
+        if (!a) return json({ error: 'not_found' }, 404);
+        if (newUser !== a.user && (admins.some((x) => x.user === newUser) || (await getOwner(env))?.user === newUser)) return json({ error: 'user_exists' }, 400);
+        a.user = newUser;
+        if (newPass) a.hash = await sha256(newPass);
+        try { await env.SHOP_KV.put('admins', JSON.stringify(admins)); } catch { return json({ error: 'try_later' }, 503); }
+        return json({ ok: true, user: newUser, cred: newUser + ':' + (newPass || curPass) });
+    }
+
     // ---- public: products ----
     if (path === '/api/products' && request.method === 'GET') {
         const products = await getProducts(env);
         if (!products) return json({ error: 'no_products' }, 404);
-        return json({ products });
+        return json({ products: products.filter((p) => !p.hidden) });
     }
 
     // ---- public: site settings ----
@@ -194,7 +236,7 @@ async function handle(request, env) {
         if (!name || !phone || !address) return json({ error: 'missing_customer' }, 400);
         if (!items.length) return json({ error: 'empty_order' }, 400);
 
-        const catalog = (await getProducts(env)) || EMBEDDED_PRODUCTS;
+        const catalog = ((await getProducts(env)) || EMBEDDED_PRODUCTS).filter((p) => !p.hidden);
         const byCode = new Map(catalog.map((p) => [p.code, p]));
         const lines = [];
         for (const it of items) {
@@ -274,7 +316,7 @@ async function handle(request, env) {
             let body;
             try { body = await request.json(); } catch { return json({ error: 'bad_json' }, 400); }
             const list = Array.isArray(body.products) ? body.products : null;
-            if (!list || !list.length || list.length > 500) return json({ error: 'bad_products' }, 400);
+            if (!list || !list.length || list.length > 2000) return json({ error: 'bad_products' }, 400);
             if (!list.every(validProduct)) return json({ error: 'invalid_product' }, 400);
             const codes = new Set(list.map((p) => p.code.trim()));
             if (codes.size !== list.length) return json({ error: 'duplicate_code' }, 400);
@@ -388,7 +430,9 @@ async function posProducts(env) {
     const info = new Map((results || []).map((r) => [r.code, r]));
     const { results: cr } = await env.POS_DB.prepare('SELECT code, cat FROM prod_cat').all();
     const cmap = new Map((cr || []).map((r) => [r.code, r.cat]));
-    return catalog.map((p) => ({ name: p.name, code: p.code, price: p.price, cat: cmap.has(p.code) ? cmap.get(p.code) : p.cat, stock: p.stock !== false, qty: info.get(p.code)?.qty ?? 0, barcode: info.get(p.code)?.barcode || '', cost: info.get(p.code)?.cost ?? 0, min_qty: info.get(p.code)?.min_qty ?? 5 }));
+    let phid = new Set();
+    try { const { results: hr } = await env.POS_DB.prepare('SELECT code FROM pos_hidden').all(); phid = new Set((hr || []).map((r) => r.code)); } catch { /* الجدول لسه مش موجود */ }
+    return catalog.filter((p) => !phid.has(p.code)).map((p) => ({ name: p.name, code: p.code, price: p.price, cat: cmap.has(p.code) ? cmap.get(p.code) : p.cat, stock: p.stock !== false, qty: info.get(p.code)?.qty ?? 0, barcode: info.get(p.code)?.barcode || '', cost: info.get(p.code)?.cost ?? 0, min_qty: info.get(p.code)?.min_qty ?? 5 }));
 }
 
 async function getCategories(env, products) {
@@ -429,12 +473,12 @@ async function handlePos(request, env, path) {
             code = 'P-' + (mx + 1);
         }
         if (catalog.some((q) => q.code === code)) return json({ error: 'duplicate_code' }, 409);
-        if (catalog.length >= 500) return json({ error: 'too_many' }, 400);
+        if (catalog.length >= 2000) return json({ error: 'too_many' }, 400);
         const cat = clean(body.cat, 30);
         const siteCat = (cat === 'كهرباء' || cat === 'أدوات صحية') ? cat : 'كهرباء';
         const qty = Math.max(0, Math.min(1000000, parseInt(body.qty, 10) || 0));
         const cost = Math.max(0, Number(body.cost) || 0);
-        catalog.push({ name, desc: '', price: Math.round(price * 100) / 100, code, cat: siteCat, stock: qty > 0 });
+        catalog.push({ name, desc: '', price: Math.round(price * 100) / 100, code, cat: siteCat, stock: qty > 0, ...(body.hidden === true ? { hidden: true } : {}) });
         await env.SHOP_KV.put('products', JSON.stringify(catalog.map((q) => ({ ...sanitizeProduct(q) }))));
         await env.POS_DB.prepare('INSERT INTO stock (code, qty, cost) VALUES (?, ?, ?) ON CONFLICT(code) DO UPDATE SET qty = excluded.qty, cost = excluded.cost').bind(code, qty, cost).run();
         if (cat) await env.POS_DB.prepare('INSERT INTO prod_cat (code, cat) VALUES (?, ?) ON CONFLICT(code) DO UPDATE SET cat = excluded.cat').bind(code, cat).run();

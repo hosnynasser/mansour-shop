@@ -634,6 +634,7 @@ function AdminPage({ onClose }: { onClose: () => void }) {
     const [siteForm, setSiteForm] = useState<SiteInfo | null>(null);
     const [admins, setAdmins] = useState<{ user: string }[] | null>(null);
     const [newAdmin, setNewAdmin] = useState({ user: '', pass: '' });
+    const [acc, setAcc] = useState({ cur: '', nu: '', np: '', np2: '' });
 
     const loadOrders = async (c: string) => {
         const r = await apiFetch('/api/admin/orders', {}, c);
@@ -675,6 +676,22 @@ function AdminPage({ onClose }: { onClose: () => void }) {
             setGateErr(e?.status === 401 ? 'بيانات الدخول غلط.' : 'في مشكلة في الاتصال. جرب تاني.');
         }
         setGateBusy(false);
+    };
+
+    const changeAccount = async () => {
+        setMsg('');
+        if (!acc.cur) { setMsg('اكتب الباسورد الحالي.'); return; }
+        if (acc.nu.trim().length < 3) { setMsg('اسم الدخول 3 حروف على الأقل.'); return; }
+        if (acc.np && acc.np.length < 6) { setMsg('الباسورد الجديد 6 حروف على الأقل.'); return; }
+        if (acc.np !== acc.np2) { setMsg('الباسورد الجديد مش متطابق.'); return; }
+        try {
+            const r = await apiFetch('/api/account/change', { method: 'POST', body: JSON.stringify({ current: acc.cur, newUser: acc.nu.trim(), newPass: acc.np }) }, cred);
+            safeSetCode(r.cred); setCred(r.cred); setAcc({ cur: '', nu: acc.nu.trim(), np: '', np2: '' });
+            setMsg('اتغيرت بيانات الدخول. استخدم الجديدة المرة الجاية (وعلى الكاشير كمان).');
+        } catch (e: any) {
+            const m = e?.message;
+            setMsg(m === 'wrong_current' ? 'الباسورد الحالي غلط.' : m === 'user_exists' ? 'اسم الدخول ده مستخدم.' : m === 'need_pass' ? 'اكتب باسورد جديد.' : m === 'try_later' ? 'مشكلة مؤقتة، جرب بعد شوية.' : 'مشكلة. جرب تاني.');
+        }
     };
 
     const setStatus = async (id: string, status: 'new' | 'preparing' | 'done') => {
@@ -901,6 +918,16 @@ function AdminPage({ onClose }: { onClose: () => void }) {
 
         {tab === 'admins' && <>
             {msg && tab === 'admins' && <p className="admin-msg">{msg}</p>}
+            <div className="prod-edit">
+                <b>تغيير اسم الدخول والباسورد بتاعي</b>
+                <div className="pe-grid">
+                    <label className="field">اسم الدخول<input dir="ltr" value={acc.nu} placeholder="مثال: mansour" onChange={(e) => setAcc({ ...acc, nu: e.target.value })} /></label>
+                    <label className="field">الباسورد الحالي<input dir="ltr" type="password" value={acc.cur} onChange={(e) => setAcc({ ...acc, cur: e.target.value })} /></label>
+                    <label className="field">باسورد جديد (سيبه فاضي لو مش عايز تغيره)<input dir="ltr" type="password" value={acc.np} onChange={(e) => setAcc({ ...acc, np: e.target.value })} /></label>
+                    <label className="field">أكد الباسورد الجديد<input dir="ltr" type="password" value={acc.np2} onChange={(e) => setAcc({ ...acc, np2: e.target.value })} /></label>
+                </div>
+                <button type="button" className="btn btn-amber" onClick={changeAccount}>حفظ بيانات الدخول</button>
+            </div>
             <div className="prod-edit">
                 <b>إضافة مشرف جديد</b>
                 <div className="pe-grid">

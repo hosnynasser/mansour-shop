@@ -21,6 +21,7 @@ function SettingsArea({ sub, setSub, staff, manager, chqAlerts, notify, categori
         { id: 'reports', icon: 'chart', label: 'التقارير', mgr: true },
         { id: 'staff', icon: 'clock', label: 'الموظفين والحضور والمرتبات', mgr: true },
         { id: 'cats', icon: 'tag', label: 'تصنيفات الأصناف', mgr: true },
+        { id: 'account', icon: 'settings', label: 'حسابي: تغيير اسم الدخول والباسورد' },
     ];
     if (sub !== 'menu') {
         const cur = items.find((i) => i.id === sub);
@@ -32,6 +33,7 @@ function SettingsArea({ sub, setSub, staff, manager, chqAlerts, notify, categori
                 {sub === 'purchases' && manager ? <PurchasesScreen products={products} refresh={refresh} notify={notify} onChequesChanged={onChequesChanged} /> : null}
                 {sub === 'reports' && manager ? <ReportsScreen notify={notify} /> : null}
                 {sub === 'staff' && manager ? <StaffHub me={staff} notify={notify} /> : null}
+                {sub === 'account' ? <AccountScreen staff={staff} notify={notify} /> : null}
                 {sub === 'cats' && manager ? <CategoriesScreen categories={categories} products={products} refresh={refresh} notify={notify} /> : null}
             </>
         );
@@ -60,6 +62,40 @@ function SettingsArea({ sub, setSub, staff, manager, chqAlerts, notify, categori
                 <button className="btn btn-danger btn-block" style={{ padding: '14px 16px', marginTop: 8 }} onClick={onLogout}><Icon n="logout" size={18} /> تسجيل الخروج ({staff.user})</button>
             </div>
         </>
+    );
+}
+
+function AccountScreen({ staff, notify }: { staff: Staff; notify: (m: string, b?: boolean) => void }) {
+    const [cur, setCur] = useState('');
+    const [nu, setNu] = useState(staff.user === 'master' ? '' : staff.user);
+    const [np, setNp] = useState('');
+    const [np2, setNp2] = useState('');
+    const [busy, setBusy] = useState(false);
+    const save = async () => {
+        if (!cur) { notify('اكتب الباسورد الحالي', true); return; }
+        if (nu.trim().length < 3) { notify('اسم الدخول 3 حروف على الأقل', true); return; }
+        if (np && np.length < 6) { notify('الباسورد الجديد 6 حروف على الأقل', true); return; }
+        if (np !== np2) { notify('الباسورد الجديد مش متطابق', true); return; }
+        setBusy(true);
+        try {
+            const r = await api('/api/account/change', 'POST', { current: cur, newUser: nu.trim(), newPass: np });
+            saveCred(r.cred); setCur(''); setNp(''); setNp2('');
+            notify('اتغيرت بيانات الدخول ✓ استخدم الجديدة المرة الجاية');
+        } catch (e: any) {
+            const c = e?.data?.error;
+            notify(c === 'wrong_current' ? 'الباسورد الحالي غلط' : c === 'user_exists' ? 'اسم الدخول ده مستخدم' : c === 'need_pass' ? 'اكتب باسورد جديد' : c === 'try_later' ? 'مشكلة مؤقتة، جرب بعد شوية' : 'مشكلة في الحفظ', true);
+        }
+        setBusy(false);
+    };
+    return (
+        <div className="close-card">
+            <label className="field">اسم الدخول<input dir="ltr" value={nu} onChange={(e) => setNu(e.target.value)} /></label>
+            <label className="field">الباسورد الحالي<input dir="ltr" type="password" value={cur} onChange={(e) => setCur(e.target.value)} /></label>
+            <label className="field">باسورد جديد (سيبه فاضي لو مش عايز تغيره)<input dir="ltr" type="password" value={np} onChange={(e) => setNp(e.target.value)} /></label>
+            <label className="field">أكد الباسورد الجديد<input dir="ltr" type="password" value={np2} onChange={(e) => setNp2(e.target.value)} /></label>
+            <button className="btn btn-amber btn-block" disabled={busy} onClick={save}>حفظ</button>
+            <p style={{ fontSize: 12, color: 'var(--muted)', marginTop: 8 }}>نفس بيانات الدخول بتشتغل على الكاشير ولوحة الموقع. بعد التغيير هتسجل دخول بالجديدة في الجهاز التاني.</p>
+        </div>
     );
 }
 
@@ -112,7 +148,7 @@ function StaffHub({ me, notify }: { me: Staff; notify: (m: string, b?: boolean) 
 }
 
 type Tab = 'sell' | 'invoices' | 'customers' | 'stock' | 'settings';
-type Sub = 'menu' | 'purchases' | 'close' | 'reports' | 'staff' | 'cats';
+type Sub = 'menu' | 'purchases' | 'close' | 'reports' | 'staff' | 'cats' | 'account';
 
 export default function App() {
     const [staff, setStaff] = useState<Staff | null>(null);
