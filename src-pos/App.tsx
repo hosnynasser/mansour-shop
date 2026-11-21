@@ -8,6 +8,7 @@ import PrintDoc from './PrintDoc';
 import PayrollHub, { AttendanceStrip } from './PayrollScreen';
 import Icon from './Icon';
 import SharePdf from './SharePdf';
+import BtPrint from './BtPrint';
 import logo from '../src/photos/logo-mansour.png';
 
 function SettingsArea({ sub, setSub, staff, manager, chqAlerts, notify, categories, products, refresh, onChequesChanged, onLogout }: {
@@ -359,6 +360,7 @@ export default function App() {
                             <div style={{ display: 'grid', gap: 8 }}>
                                 <button className="btn btn-blue btn-block" onClick={() => setPrintJob({ ...done, mode: 'r80' })}>🖨️ طباعة إيصال (80مم)</button>
                                 <button className="btn btn-ghost btn-block" onClick={() => setPrintJob({ ...done, mode: 'a4' })}>📄 طباعة / PDF (A4)</button>
+                                <BtPrint inv={done.inv} items={done.items} logo={logo} notify={notify} />
                                 <button className="btn btn-wa btn-block" onClick={() => waShare(done.inv, done.items)}>إرسال واتساب</button>
                                 <SharePdf inv={done.inv} items={done.items} logo={logo} notify={notify} />
                                 {manager ? <button className="btn btn-danger btn-block" onClick={() => voidInvoice(done.inv.id)}>إلغاء الفاتورة</button> : null}
@@ -396,6 +398,7 @@ export default function App() {
                             <div style={{ display: 'grid', gap: 8, marginTop: 12 }}>
                                 <button className="btn btn-blue btn-block" onClick={() => setPrintJob({ ...detail, mode: 'r80' })}>🖨️ طباعة إيصال (80مم)</button>
                                 <button className="btn btn-ghost btn-block" onClick={() => setPrintJob({ ...detail, mode: 'a4' })}>📄 طباعة / PDF (A4)</button>
+                                <BtPrint inv={detail.inv} items={detail.items} logo={logo} notify={notify} />
                                 <button className="btn btn-wa btn-block" onClick={() => waShare(detail.inv, detail.items)}>إرسال واتساب</button>
                                 <SharePdf inv={detail.inv} items={detail.items} logo={logo} notify={notify} />
                                 {manager && detail.inv.status !== 'voided' ? <button className="btn btn-danger btn-block" onClick={() => voidInvoice(detail.inv.id)}>إلغاء الفاتورة</button> : null}
