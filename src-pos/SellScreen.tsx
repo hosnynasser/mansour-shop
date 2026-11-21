@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import PN from './Bidi';
 import { api, fmt, CartLine, Customer, Invoice, Product } from './lib';
 import ScannerModal from './ScannerModal';
 import Icon from './Icon';
@@ -171,7 +172,7 @@ export default function SellScreen({
                         return (
                             <button key={p.code} className={'prod-card' + (out ? ' out' : '')} onClick={() => addLine(p)}>
                                 <span className={'pq' + (out ? ' zero' : p.qty <= 5 ? ' low' : '')}>{out ? 'خلص' : p.qty}</span>
-                                <span className="pn">{p.name}</span>
+                                <span className="pn"><PN t={p.name} /></span>
                                 <span className="pc">{p.code}</span>
                                 <span className="pp">{fmt(p.price)} ج</span>
                             </button>
@@ -200,7 +201,7 @@ export default function SellScreen({
                             {cart.map((l) => (
                                 <div className="cline" key={l.code}>
                                     <div className="cn">
-                                        <b>{l.name}</b>
+                                        <b><PN t={l.name} /></b>
                                         <span>{fmt(l.price)} ج</span>
                                     </div>
                                     <div className="stepper">

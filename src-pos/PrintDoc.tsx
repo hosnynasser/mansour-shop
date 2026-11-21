@@ -1,4 +1,5 @@
 import { fmt, fmtTime, paymentLabel, Invoice, InvoiceItem, SHOP_NAME, SHOP_PHONE } from './lib';
+import PN from './Bidi';
 
 // منطقة الطباعة المخفية: بتظهر بس وقت الطباعة (إيصال 80مم أو فاتورة A4)
 export default function PrintDoc({ inv, items, mode, logo }: { inv: Invoice; items: InvoiceItem[]; mode: 'r80' | 'a4'; logo: string }) {
@@ -18,7 +19,7 @@ export default function PrintDoc({ inv, items, mode, logo }: { inv: Invoice; ite
                     <tbody>
                         {items.map((it, i) => (
                             <tr key={i}>
-                                <td>{it.name}<br />{fmt(it.price)} × {it.qty}{it.discount > 0 ? ` (-${fmt(it.discount)})` : ''}</td>
+                                <td><PN t={it.name} /><br />{fmt(it.price)} × {it.qty}{it.discount > 0 ? ` (-${fmt(it.discount)})` : ''}</td>
                                 <td className="rl">{fmt(it.line_total)}</td>
                             </tr>
                         ))}
@@ -54,7 +55,7 @@ export default function PrintDoc({ inv, items, mode, logo }: { inv: Invoice; ite
                 <tbody>
                     {items.map((it, i) => (
                         <tr key={i}>
-                            <td>{it.name}</td><td>{it.code}</td><td>{fmt(it.price)}</td><td>{it.qty}</td>
+                            <td><PN t={it.name} /></td><td>{it.code}</td><td>{fmt(it.price)}</td><td>{it.qty}</td>
                             <td>{it.discount > 0 ? fmt(it.discount) : '-'}</td><td>{fmt(it.line_total)}</td>
                         </tr>
                     ))}

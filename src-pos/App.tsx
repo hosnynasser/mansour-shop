@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import PN from './Bidi';
 import { createPortal } from 'react-dom';
 import { api, buildWaText, clearCred, cred, fmt, fmtTime, paymentLabel, quoteAsInvoice, saveCred, Customer, Invoice, InvoiceItem, Product, Quote, Staff } from './lib';
 import SellScreen from './SellScreen';
@@ -424,7 +425,7 @@ export default function App() {
                             <div style={{ margin: '10px 0' }}>
                                 {detail.items.map((it, i) => (
                                     <div className="close-line" key={i}>
-                                        <span>{it.name} × {it.qty}{it.discount > 0 ? ` (-${fmt(it.discount)})` : ''}</span>
+                                        <span><PN t={it.name} /> × {it.qty}{it.discount > 0 ? ` (-${fmt(it.discount)})` : ''}</span>
                                         <b>{fmt(it.line_total)} ج</b>
                                     </div>
                                 ))}
@@ -469,7 +470,7 @@ export default function App() {
                                 <div style={{ margin: '10px 0' }}>
                                     {quoteDetail.items.map((it, i) => (
                                         <div className="close-line" key={i}>
-                                            <span>{it.name} × {it.qty}{it.discount > 0 ? ` (-${fmt(it.discount)})` : ''}</span>
+                                            <span><PN t={it.name} /> × {it.qty}{it.discount > 0 ? ` (-${fmt(it.discount)})` : ''}</span>
                                             <b>{fmt(it.line_total)} ج</b>
                                         </div>
                                     ))}

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import PN from './Bidi';
 import ChequesPanel from './ChequesScreen';
 import { api, fmt, fmtTime, Product, Purchase, PurchaseItem, Supplier } from './lib';
 
@@ -104,7 +105,7 @@ export default function PurchasesScreen({ products, refresh, notify, onChequesCh
                             <div style={{ margin: '10px 0' }}>
                                 {detail.items.map((it, i) => (
                                     <div className="close-line" key={i}>
-                                        <span>{it.name} × {it.qty} (تكلفة {fmt(it.cost)})</span>
+                                        <span><PN t={it.name} /> × {it.qty} (تكلفة {fmt(it.cost)})</span>
                                         <b>{fmt(it.cost * it.qty)} ج</b>
                                     </div>
                                 ))}
@@ -241,7 +242,7 @@ function NewPurchaseSheet({ products, suppliers, onClose, onDone, notify }: { pr
                         const p = products.find((x) => x.code === l.code);
                         return (
                             <div key={l.code} style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 8 }}>
-                                <div style={{ flex: 1.6, fontSize: 13, fontWeight: 700 }}>{p?.name}<div style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 400 }}>{l.code}</div></div>
+                                <div style={{ flex: 1.6, fontSize: 13, fontWeight: 700 }}><PN t={p?.name} /><div style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 400 }}>{l.code}</div></div>
                                 <input inputMode="numeric" placeholder="الكمية" value={l.qty} onChange={(e) => setLines((ls) => ls.map((x) => x.code === l.code ? { ...x, qty: e.target.value } : x))} style={{ width: 64, border: '1.5px solid var(--line)', borderRadius: 10, padding: '8px', textAlign: 'center' }} />
                                 <input inputMode="decimal" placeholder="تكلفة القطعة" value={l.cost} onChange={(e) => setLines((ls) => ls.map((x) => x.code === l.code ? { ...x, cost: e.target.value } : x))} style={{ width: 90, border: '1.5px solid var(--line)', borderRadius: 10, padding: '8px', textAlign: 'center' }} />
                                 <button className="btn btn-ghost btn-sm" onClick={() => setLines((ls) => ls.filter((x) => x.code !== l.code))}>✕</button>

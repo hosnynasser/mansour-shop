@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import PN from './Bidi';
 import { api, cairoToday, fmt, fmtTime, paymentLabel, Customer, Expense, Invoice, LedgerEntry, Product, Quote, Report, Role, Staff } from './lib';
 import Icon from './Icon';
 import CatChips from './CatChips';
@@ -157,7 +158,7 @@ export function StockScreen({ staff, products, categories, refresh, notify }: { 
             ) : null}
             {filtered.map((p) => (
                 <div className="stock-row" key={p.code}>
-                    <div className="sn">{p.name}<span>{p.code}{(p as any).barcode ? ' · 🏷️ ' + (p as any).barcode : ''}</span>
+                    <div className="sn"><PN t={p.name} /><span>{p.code}{(p as any).barcode ? ' · 🏷️ ' + (p as any).barcode : ''}</span>
                         {manager && categories.length > 0 ? (
                             <select className="cat-sel" value={categories.includes(p.cat) ? p.cat : ''} onChange={(e) => setCat(p.code, e.target.value)}>
                                 <option value="">— بدون تصنيف —</option>
@@ -685,7 +686,7 @@ export function ReportsScreen({ notify }: { notify: (m: string, b?: boolean) => 
                             <h4>🏆 الأصناف الأكثر مبيعاً</h4>
                             {rep.top.map((p, i) => (
                                 <div className="close-line" key={p.code}>
-                                    <span>{i + 1}. {p.name} <span style={{ color: 'var(--muted)', fontSize: 12 }}>× {p.qty}</span></span>
+                                    <span>{i + 1}. <PN t={p.name} /> <span style={{ color: 'var(--muted)', fontSize: 12 }}>× {p.qty}</span></span>
                                     <b>{fmt(p.revenue)} ج</b>
                                 </div>
                             ))}
