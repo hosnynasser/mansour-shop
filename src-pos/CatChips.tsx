@@ -1,7 +1,12 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 export default function CatChips({ categories, sel, setSel, extraNone }: { categories: string[]; sel: string; setSel: (c: string) => void; extraNone?: boolean }) {
     const [open, setOpen] = useState(false);
+    useEffect(() => {
+        if (!open) return;
+        document.documentElement.classList.add('dd-lock');
+        return () => document.documentElement.classList.remove('dd-lock');
+    }, [open]);
     if (!categories.length) return null;
     const pick = (c: string) => { setSel(c); setOpen(false); };
     const label = sel === '' ? 'الكل' : sel === '__none' ? 'غير مصنف' : sel;
