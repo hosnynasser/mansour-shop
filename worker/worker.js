@@ -572,9 +572,15 @@ async function handlePos(request, env, path) {
         const args = [];
         if (!manager || !all) { sql += ' AND staff = ?'; args.push(staff.user); }
         if (date) { sql += ' AND day = ?'; args.push(date); }
-        sql += ' ORDER BY id DESC LIMIT 200';
+        const lim = parseInt(url.searchParams.get('limit') || '', 10);
+        const pageSize = lim > 0 ? Math.min(lim, 100) : 200;
+        const before = parseInt(url.searchParams.get('before') || '', 10);
+        if (before > 0) { sql += ' AND id < ?'; args.push(before); }
+        sql += ' ORDER BY id DESC LIMIT ' + (pageSize + 1);
         const { results } = await env.POS_DB.prepare(sql).bind(...args).all();
-        return json({ invoices: results || [] });
+        const rows = results || [];
+        const more = rows.length > pageSize;
+        return json({ invoices: more ? rows.slice(0, pageSize) : rows, more });
     }
 
     // فاتورة واحدة بالأصناف

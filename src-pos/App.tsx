@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import PN from './Bidi';
 import { createPortal } from 'react-dom';
-import { api, buildWaText, clearCred, cred, fmt, fmtTime, paymentLabel, quoteAsInvoice, saveCred, Customer, Invoice, InvoiceItem, Product, Quote, Staff } from './lib';
+import { api, buildWaText, clearCred, cred, fmt, fmtTime, paymentLabel, quoteAsInvoice, saveCred, cget, cset, Customer, Invoice, InvoiceItem, Product, Quote, Staff } from './lib';
 import SellScreen from './SellScreen';
 import { CloseScreen, CustomersScreen, InvoicesScreen, ReportsScreen, StaffScreen, StockScreen } from './screens';
 import PurchasesScreen from './PurchasesScreen';
@@ -200,7 +200,7 @@ export default function App() {
     }, []);
 
     const refreshProducts = useCallback(async () => {
-        try { const r = await api('/api/pos/products'); setProducts(r.products || []); setCategories(r.categories || []); } catch {}
+        try { const r = await api('/api/pos/products'); setProducts(r.products || []); setCategories(r.categories || []); cset('products', { products: r.products || [], categories: r.categories || [] }); } catch {}
     }, []);
 
     const refreshChequeAlerts = useCallback(async (announce = false) => {
@@ -216,11 +216,14 @@ export default function App() {
     useEffect(() => {
         (async () => {
             if (cred()) {
+                const cm = cget<Staff>('me'); const cp = cget<{ products: Product[]; categories: string[] }>('products');
+                if (cm && cp) { setStaff(cm); setProducts(cp.products || []); setCategories(cp.categories || []); setBooting(false); }
                 try {
+                    const pr = refreshProducts();
                     const me = await api('/api/pos/me');
-                    setStaff(me);
-                    refreshProducts();
-                } catch { clearCred(); }
+                    setStaff(me); cset('me', me);
+                    await pr;
+                } catch (e: any) { if (e?.message === 'unauthorized' || !cm) { clearCred(); setStaff(null); } }
             }
             setBooting(false);
         })();

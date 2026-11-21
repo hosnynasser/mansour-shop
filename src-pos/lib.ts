@@ -32,8 +32,14 @@ export function cred(): string {
 export function saveCred(c: string) {
     try { localStorage.setItem('pos_cred', c); } catch {}
 }
+export function cget<T>(k: string): T | null {
+    try { const v = localStorage.getItem('pc_' + k); return v ? JSON.parse(v) as T : null; } catch { return null; }
+}
+export function cset(k: string, v: unknown) {
+    try { localStorage.setItem('pc_' + k, JSON.stringify(v)); } catch {}
+}
 export function clearCred() {
-    try { localStorage.removeItem('pos_cred'); } catch {}
+    try { localStorage.removeItem('pos_cred'); Object.keys(localStorage).filter((x) => x.startsWith('pc_')).forEach((x) => localStorage.removeItem(x)); } catch {}
 }
 
 export async function api(path: string, method = 'GET', body?: any): Promise<any> {

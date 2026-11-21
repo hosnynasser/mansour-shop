@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import PN from './Bidi';
-import { api, cairoToday, fmt, fmtTime, paymentLabel, Customer, Expense, Invoice, LedgerEntry, Product, Quote, Report, Role, Staff } from './lib';
+import { api, cget, cset, cairoToday, fmt, fmtTime, paymentLabel, Customer, Expense, Invoice, LedgerEntry, Product, Quote, Report, Role, Staff } from './lib';
 import Icon from './Icon';
 import CatChips from './CatChips';
 import ScannerModal from './ScannerModal';
@@ -15,20 +15,46 @@ export function InvoicesScreen({ staff, openInvoice, openQuote, notify }: { staf
     const [loading, setLoading] = useState(true);
     const manager = staff.role === 'manager';
 
+    const [more, setMore] = useState(false);
+    const [loadingMore, setLoadingMore] = useState(false);
+    const sentinel = useRef<HTMLDivElement | null>(null);
+    const PAGE = 30;
+    const base = () => '/api/pos/invoices?limit=' + PAGE + (manager && view === 'all' ? '&all=1' : '');
+    const ckey = 'inv_' + staff.user + '_' + view;
+
     const load = async () => {
-        setLoading(true);
+        if (view === 'quotes') {
+            const c = cget<Quote[]>('quotes_' + staff.user); if (c) { setQuotes(c); setLoading(false); } else setLoading(true);
+        } else {
+            const c = cget<Invoice[]>(ckey); if (c) { setList(c); setLoading(false); } else setLoading(true);
+        }
         try {
             if (view === 'quotes') {
                 const r = await api('/api/pos/quotes' + (manager ? '?all=1' : ''));
-                setQuotes(r.quotes || []);
+                setQuotes(r.quotes || []); cset('quotes_' + staff.user, (r.quotes || []).slice(0, 60));
             } else {
-                const r = await api('/api/pos/invoices' + (manager && view === 'all' ? '?all=1' : ''));
-                setList(r.invoices || []);
+                const r = await api(base());
+                setList(r.invoices || []); setMore(!!r.more); cset(ckey, (r.invoices || []).slice(0, PAGE));
             }
         } catch { notify('مشكلة في التحميل', true); }
         setLoading(false);
     };
     useEffect(() => { load(); }, [view]);
+
+    const loadMore = async () => {
+        if (loadingMore || !more || !list.length) return;
+        setLoadingMore(true);
+        try {
+            const r = await api(base() + '&before=' + list[list.length - 1].id);
+            setList((l) => [...l, ...(r.invoices || [])]); setMore(!!r.more);
+        } catch {}
+        setLoadingMore(false);
+    };
+    useEffect(() => {
+        const el = sentinel.current; if (!el || !more) return;
+        const io = new IntersectionObserver((en) => { if (en[0].isIntersecting) loadMore(); }, { rootMargin: '300px' });
+        io.observe(el); return () => io.disconnect();
+    });
 
     const qBadge = (st: string) => (st === 'converted' ? '✅ اتحولت لفاتورة' : st === 'canceled' ? '❌ ملغي' : '🕐 مفتوح');
 
@@ -62,6 +88,7 @@ export function InvoicesScreen({ staff, openInvoice, openQuote, notify }: { staf
                     </button>
                 ))
             )}
+            {view !== 'quotes' && more ? <div ref={sentinel} className="empty" style={{ padding: 16 }}>{loadingMore ? 'جاري التحميل…' : ''}</div> : null}
         </>
     );
 }
