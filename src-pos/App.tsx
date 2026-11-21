@@ -334,7 +334,7 @@ export default function App() {
         );
     }
 
-    if (booting) return <div className="pos-shell"><div className="empty" style={{ marginTop: 120 }}>⏳ جاري التحميل…</div></div>;
+    if (booting) return <div className="splash"><img className="lg" src={logo} alt="" /><h1>منصور</h1><div className="en">MANSOUR POS</div><div className="bar"><i></i></div></div>;
 
     if (!staff) return <Login onLogin={(s) => { setStaff(s); refreshProducts(); }} />;
 
