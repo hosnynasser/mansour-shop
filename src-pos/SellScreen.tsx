@@ -44,6 +44,22 @@ export default function SellScreen({
         });
     }, [q, products, catSel, categories]);
 
+    // تحميل تدريجي: دفعة صغيرة الأول، والباقي بيتحمّل لما المستخدم يسكرول
+    const BATCH = 30;
+    const [shown, setShown] = useState(BATCH);
+    const sentinel = useRef<HTMLDivElement>(null);
+    useEffect(() => { setShown(BATCH); }, [q, catSel]);
+    const hasMore = shown < filtered.length;
+    useEffect(() => {
+        const el = sentinel.current;
+        if (!el || !hasMore) return;
+        const io = new IntersectionObserver((es) => {
+            if (es.some((e) => e.isIntersecting)) setShown((n) => n + BATCH);
+        }, { rootMargin: '600px 0px' });
+        io.observe(el);
+        return () => io.disconnect();
+    }, [hasMore, shown, filtered]);
+
     const addLine = (p: Product) => {
         setCart((c) => {
             const i = c.findIndex((l) => l.code === p.code);
@@ -167,7 +183,7 @@ export default function SellScreen({
 
             {filtered.length === 0 ? <div className="empty">مفيش أصناف مطابقة للبحث</div> : (
                 <div className="prod-grid">
-                    {filtered.map((p) => {
+                    {filtered.slice(0, shown).map((p) => {
                         const out = p.qty <= 0;
                         return (
                             <button key={p.code} className={'prod-card' + (out ? ' out' : '')} onClick={() => addLine(p)}>
@@ -180,6 +196,7 @@ export default function SellScreen({
                     })}
                 </div>
             )}
+            {hasMore ? <div ref={sentinel} className="more-sentinel">جاري تحميل المزيد… ({shown} من {filtered.length})</div> : null}
 
             {cart.length > 0 && !cartOpen ? (
                 <button className="cart-bar" onClick={() => setCartOpen(true)}>

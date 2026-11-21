@@ -278,3 +278,5 @@ body{line-height:1.5;letter-spacing:0}
 .prod-card .pn{padding-inline-end:34px;font-size:14px;line-height:1.4}
 .prod-card .pc{margin-top:2px}
 .pos-main{padding-bottom:140px!important}
+
+.more-sentinel{text-align:center;color:var(--muted);font-size:12px;padding:18px 0 90px}
