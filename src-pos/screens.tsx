@@ -125,7 +125,8 @@ export function StockScreen({ staff, products, categories, refresh, notify }: { 
     const s = dq.trim().toLowerCase();
     const [catSel, setCatSel] = useState('');
     const [shown, setShown] = useState(PAGE_N);
-    useEffect(() => { setShown(PAGE_N); }, [s, catSel]);
+    const [lowOnly, setLowOnly] = useState(false);
+    useEffect(() => { setShown(PAGE_N); }, [s, catSel, lowOnly]);
     const idx = useMemo(() => products.map((p) => (p.name + ' ' + p.code).toLowerCase()), [products]);
     const [form, setForm] = useState<{ mode: 'add' | 'edit'; name: string; code: string; price: string; cost: string; qty: string; cat: string } | null>(null);
     const [fBusy, setFBusy] = useState(false);
@@ -154,7 +155,7 @@ export function StockScreen({ staff, products, categories, refresh, notify }: { 
             notify(r.hidden ? 'اتخفى الصنف (له فواتير قديمة) ✓' : 'اتمسح الصنف ✓'); refresh();
         } catch { notify('مشكلة في المسح', true); }
     };
-    const filtered = useMemo(() => products.filter((p, i) => (!catSel || p.cat === catSel) && (!s || idx[i].includes(s))), [products, idx, catSel, s]);
+    const filtered = useMemo(() => products.filter((p, i) => (!catSel || p.cat === catSel) && (!lowOnly || p.qty <= ((p as any).min_qty ?? 5)) && (!s || idx[i].includes(s))), [products, idx, catSel, s, lowOnly]);
     const setCat = async (code: string, cat: string) => {
         try { await api('/api/pos/product-cat', 'POST', { code, cat }); refresh(); notify('اتغير التصنيف ✓'); } catch { notify('مشكلة في حفظ التصنيف', true); }
     };
@@ -191,14 +192,12 @@ export function StockScreen({ staff, products, categories, refresh, notify }: { 
                     <input placeholder="ابحث بالاسم أو الكود…" value={q} onChange={(e) => setQ(e.target.value)} />
                 </div>
             </div>
-            <CatChips categories={categories} sel={catSel} setSel={setCatSel} />
+            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                <CatChips categories={categories} sel={catSel} setSel={(c) => { setCatSel(c); setLowOnly(false); }} />
+                <div className="cat-dd"><button className={'cat-dd-btn' + (lowOnly ? ' on' : '')} style={lowOnly ? { background: 'var(--danger)', borderColor: 'var(--danger)' } : { color: low.length ? 'var(--danger)' : undefined }} onClick={() => { setLowOnly(!lowOnly); setCatSel(''); }}>النواقص {low.length}</button></div>
+            </div>
             {manager ? <button className="btn btn-amber btn-block" style={{ marginBottom: 10 }} onClick={() => setForm({ mode: 'add', name: '', code: '', price: '', cost: '', qty: '', cat: '' })}><Icon n="plus" size={18} /> إضافة صنف جديد</button> : null}
             {!manager ? <div className="err-box" style={{ background: '#fff8ea', color: 'var(--amber-d)' }}>عرض فقط — تعديل الأرصدة للمدير</div> : null}
-            {low.length > 0 ? (
-                <div className="err-box" style={{ background: '#fdecec', color: 'var(--danger)', marginBottom: 10 }}>
-                    ⚠️ نواقص المخزون ({low.length}): {low.slice(0, 8).map((p) => p.name + ' (' + p.qty + ')').join('، ')}{low.length > 8 ? ' … و' + (low.length - 8) + ' صنف تاني' : ''}
-                </div>
-            ) : null}
             {filtered.slice(0, shown).map((p) => (
                 <div className="stock-row" key={p.code}>
                     <div className="sn"><PN t={p.name} /><span>{p.code}{(p as any).barcode ? ' · 🏷️ ' + (p as any).barcode : ''}</span>
