@@ -6,7 +6,7 @@ import SellScreen from './SellScreen';
 import { CloseScreen, CustomersScreen, InvoicesScreen, ReportsScreen, StaffScreen, StockScreen } from './screens';
 import PurchasesScreen from './PurchasesScreen';
 import PrintDoc from './PrintDoc';
-import PayrollHub, { AttendanceStrip } from './PayrollScreen';
+import PayrollHub from './PayrollScreen';
 import Icon from './Icon';
 import SharePdf from './SharePdf';
 import BtPrint from './BtPrint';
@@ -20,7 +20,7 @@ function SettingsArea({ sub, setSub, staff, manager, chqAlerts, notify, categori
         { id: 'close', icon: 'calc', label: 'التقفيلة' },
         { id: 'purchases', icon: 'truck', label: 'المشتريات والموردين والشيكات', mgr: true },
         { id: 'reports', icon: 'chart', label: 'التقارير', mgr: true },
-        { id: 'staff', icon: 'clock', label: 'الموظفين والحضور والمرتبات', mgr: true },
+        { id: 'staff', icon: 'clock', label: 'الموظفين والمرتبات', mgr: true },
         { id: 'cats', icon: 'tag', label: 'تصنيفات الأصناف', mgr: true },
         { id: 'account', icon: 'settings', label: 'حسابي: تغيير اسم الدخول والباسورد' },
     ];
@@ -42,10 +42,6 @@ function SettingsArea({ sub, setSub, staff, manager, chqAlerts, notify, categori
     return (
         <>
             <h3 className="scr-title"><span className="ico-tile"><Icon n="settings" size={20} /></span>الإعدادات</h3>
-            <div style={{ border: '1.5px solid var(--line)', borderRadius: 14, overflow: 'hidden', marginBottom: 12, background: '#fff' }}>
-                <div style={{ padding: '8px 14px 0', fontSize: 12, color: 'var(--muted)', fontWeight: 700 }}>حضوري وانصرافي</div>
-                <AttendanceStrip notify={notify} />
-            </div>
             <div style={{ display: 'grid', gap: 8 }}>
                 {items.filter((i) => !i.mgr || manager).map((i) => (
                     <button key={i.id} className="menu-row" onClick={() => setSub(i.id)}>
@@ -141,7 +137,7 @@ function StaffHub({ me, notify }: { me: Staff; notify: (m: string, b?: boolean) 
         <>
             <div className="pay-toggle" style={{ marginBottom: 12 }}>
                 <button className={v === 'acc' ? 'on' : ''} onClick={() => setV('acc')}>👥 الحسابات</button>
-                <button className={v === 'pay' ? 'on' : ''} onClick={() => setV('pay')}>⏱️ الحضور والمرتبات</button>
+                <button className={v === 'pay' ? 'on' : ''} onClick={() => setV('pay')}>💰 المرتبات</button>
             </div>
             {v === 'acc' ? <StaffScreen me={me} notify={notify} /> : <PayrollHub me={me} staffNames={names} notify={notify} />}
         </>
