@@ -409,7 +409,7 @@ export default function App() {
             {/* نجاح البيع */}
             {done ? (
                 <>
-                    <div className="sheet-back" />
+                    <div className="sheet-back" onClick={() => setDone(null)} />
                     <div className="sheet">
                         <div className="sheet-b">
                             <div className="done-hero">
