@@ -34,8 +34,6 @@ export default function SellScreen({
     const [custName, setCustName] = useState('');
     const [custPhone, setCustPhone] = useState('');
     const [busy, setBusy] = useState(false);
-    const [discOpen, setDiscOpen] = useState(false);
-    const [waOpen, setWaOpen] = useState(false);
     const [loy, setLoy] = useState<Loyalty | null>(null);
     const [ptsPick, setPtsPick] = useState(false);
     const [redeem, setRedeem] = useState('');
@@ -208,17 +206,6 @@ export default function SellScreen({
         </div>
     ) : null;
 
-    const fold = (label: string, open: boolean, setOpen: (v: boolean) => void, summary: string, body: React.ReactNode) => (
-        <div className="field">
-            <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', border: '1.5px solid var(--line)', borderRadius: 12, padding: '11px 13px', background: '#f8fafd', color: 'var(--navy)', fontWeight: 700, fontSize: 13, textAlign: 'start' }}>
-                <span style={{ flex: 1 }}>{label}</span>
-                {!open && summary ? <span dir="ltr" style={{ color: 'var(--ink)', fontWeight: 600 }}>{summary}</span> : null}
-                <span style={{ fontSize: 16, lineHeight: 1, display: 'inline-block', transform: open ? 'rotate(180deg)' : 'none' }}>▾</span>
-            </button>
-            {open ? body : null}
-        </div>
-    );
-
     return (
         <>
             {!cartOpen ? pendBanner : null}
@@ -298,9 +285,6 @@ export default function SellScreen({
                             ))}
 
                             <div style={{ margin: '14px 0 6px' }}>
-                                {fold('خصم على الفاتورة كلها (جنيه)', discOpen, setDiscOpen, invDisc.trim() ? invDisc.trim() + ' ج' : '', (
-                                    <input inputMode="decimal" value={invDisc} onChange={(e) => setInvDisc(e.target.value)} placeholder="0" style={{ marginTop: 5 }} />
-                                ))}
                                 {(
                                 <div className="field">
                                     <label>اسم العميل{payment === 'debt' ? '' : ' (اختياري)'}</label>
@@ -341,9 +325,16 @@ export default function SellScreen({
                                     ) : null}
                                 </div>
                                 )}
-                                {quoteMode || payment !== 'debt' ? fold('رقم واتساب العميل (اختياري — لإرسال الفاتورة)', waOpen, setWaOpen, custPhone.trim(), (
-                                    <input inputMode="tel" dir="ltr" style={{ textAlign: 'end', marginTop: 5 }} value={custPhone} onChange={(e) => setCustPhone(e.target.value)} placeholder="01xxxxxxxxx" />
-                                )) : null}
+                                {quoteMode || payment !== 'debt' ? (
+                                    <div className="field">
+                                        <label>رقم واتساب العميل (اختياري — لإرسال الفاتورة)</label>
+                                        <input inputMode="tel" dir="ltr" style={{ textAlign: 'end' }} value={custPhone} onChange={(e) => setCustPhone(e.target.value)} placeholder="01xxxxxxxxx" />
+                                    </div>
+                                ) : null}
+                                <div className="field">
+                                    <label>خصم على الفاتورة كلها (جنيه)</label>
+                                    <input inputMode="decimal" value={invDisc} onChange={(e) => setInvDisc(e.target.value)} placeholder="0" />
+                                </div>
                             </div>
                             </fieldset>
                         </div>

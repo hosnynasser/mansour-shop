@@ -1108,6 +1108,19 @@ async function handlePos(request, env, path, ctx) {
         return json({ kind, headers, rows });
     }
 
+    // ---- إظهار/إخفاء أزرار الفاتورة (الافتراضي مخفي) ----
+    if (path === '/api/pos/ui-prefs' && request.method === 'GET') {
+        return json({ prefs: await uiPrefs(env) });
+    }
+    if (path === '/api/pos/ui-prefs' && request.method === 'PUT') {
+        if (!manager) return json({ error: 'forbidden' }, 403);
+        let body;
+        try { body = await request.json(); } catch { return json({ error: 'bad_json' }, 400); }
+        await env.POS_DB.batch(['wa', 'r80', 'pdf'].map((k) =>
+            env.POS_DB.prepare("INSERT INTO settings (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v").bind('ui_show_' + k, body[k] === true ? '1' : '0')));
+        return json({ ok: true, prefs: await uiPrefs(env) });
+    }
+
     // ---- نقاط الولاء ----
     if (path === '/api/pos/loyalty' && request.method === 'GET') {
         return json({ settings: await loyaltySettings(env) });
@@ -1523,6 +1536,12 @@ async function createInvoiceCore(env, staffUser, body, ctx) {
 }
 
 // ---------- نقاط الولاء + الحضور + المرتبات: دوال مساعدة ----------
+async function uiPrefs(env) {
+    const { results } = await env.POS_DB.prepare("SELECT k, v FROM settings WHERE k LIKE 'ui_show_%'").all();
+    const m = new Map((results || []).map((r) => [r.k, r.v]));
+    return { wa: m.get('ui_show_wa') === '1', r80: m.get('ui_show_r80') === '1', pdf: m.get('ui_show_pdf') === '1' };
+}
+
 async function loyaltySettings(env) {
     const { results } = await env.POS_DB.prepare("SELECT k, v FROM settings WHERE k LIKE 'loyalty_%'").all();
     const m = new Map((results || []).map((r) => [r.k, r.v]));

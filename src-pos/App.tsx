@@ -11,6 +11,7 @@ import PayrollHub from './PayrollScreen';
 import Icon from './Icon';
 import SharePdf from './SharePdf';
 import BtPrint from './BtPrint';
+import { UiPrefsCard, loadUiPrefs, useUiPrefs } from './uiPrefs';
 import logo from '../src/photos/logo-mansour.png';
 
 function SettingsArea({ sub, setSub, staff, manager, chqAlerts, notify, categories, products, refresh, onChequesChanged, onLogout }: {
@@ -43,6 +44,7 @@ function SettingsArea({ sub, setSub, staff, manager, chqAlerts, notify, categori
         <>
             <h3 className="scr-title"><span className="ico-tile"><Icon n="settings" size={20} /></span>الإعدادات</h3>
             <div style={{ display: 'grid', gap: 8 }}>
+                {manager ? <UiPrefsCard notify={notify} /> : null}
                 {items.filter((i) => !i.mgr || manager).map((i) => (
                     <button key={i.id} className="menu-row" onClick={() => setSub(i.id)}>
                         <span className="ico-tile"><Icon n={i.icon} size={20} /></span>
@@ -171,6 +173,7 @@ export default function App() {
     const [categories, setCategories] = useState<string[]>([]);
     const [products, setProducts] = useState<Product[]>([]);
     const [toast, setToast] = useState<{ msg: string; bad: boolean } | null>(null);
+    const uip = useUiPrefs();
     const [done, setDone] = useState<{ inv: Invoice; items: InvoiceItem[]; timing?: string } | null>(null);
     const [quoteMode, setQuoteMode] = useState(false);
     const [invView, setInvView] = useState<'mine' | 'quotes'>('mine');
@@ -226,6 +229,7 @@ export default function App() {
         } catch {}
     }, [notify]);
     useEffect(() => { if (staff && staff.role === 'manager') refreshChequeAlerts(true); }, [staff?.user, staff?.role]);
+    useEffect(() => { if (staff) loadUiPrefs(); }, [staff?.user]);
     useEffect(() => { if (staff) { const c0 = cred(); api('/api/pos/customers').then((r) => csetIf('customers', r.customers || [], c0)).catch(() => {}); } }, [staff?.user]);
     useEffect(() => { if (staff && staff.role === 'manager') { const c0 = cred(); api('/api/pos/suppliers').then((r) => csetIf('suppliers', r.suppliers || [], c0)).catch(() => {}); } else if (staff) { try { localStorage.removeItem('pc_suppliers'); } catch {} } }, [staff?.user, staff?.role]);
 
@@ -415,10 +419,10 @@ export default function App() {
                                 {done.timing ? <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>{done.timing}</div> : null}
                             </div>
                             <div style={{ display: 'grid', gap: 8 }}>
-                                <button className="btn btn-blue btn-block" onClick={() => setPrintJob({ ...done, mode: 'r80' })}>🖨️ طباعة إيصال (80مم)</button>
-                                <button className="btn btn-ghost btn-block" onClick={() => setPrintJob({ ...done, mode: 'a4' })}>📄 طباعة / PDF (A4)</button>
+                                {uip.r80 ? <button className="btn btn-blue btn-block" onClick={() => setPrintJob({ ...done, mode: 'r80' })}>🖨️ طباعة إيصال (80مم)</button> : null}
+                                {uip.pdf ? <button className="btn btn-ghost btn-block" onClick={() => setPrintJob({ ...done, mode: 'a4' })}>📄 طباعة / PDF (A4)</button> : null}
                                 <BtPrint inv={done.inv} items={done.items} logo={logo} notify={notify} />
-                                <button className="btn btn-wa btn-block" onClick={() => waShare(done.inv, done.items)}>إرسال واتساب</button>
+                                {uip.wa ? <button className="btn btn-wa btn-block" onClick={() => waShare(done.inv, done.items)}>إرسال واتساب</button> : null}
                                 <SharePdf inv={done.inv} items={done.items} logo={logo} notify={notify} />
                                 {manager ? <button className="btn btn-danger btn-block" onClick={() => voidInvoice(done.inv.id)}>إلغاء الفاتورة</button> : null}
                                 <button className="btn btn-amber btn-block" onClick={() => setDone(null)}>🛒 بيع جديد</button>
@@ -453,10 +457,10 @@ export default function App() {
                             {detail.inv.discount > 0 ? <div className="close-line"><span>خصم الفاتورة</span><b>-{fmt(detail.inv.discount)} ج</b></div> : null}
                             <div className="close-line" style={{ fontSize: 17 }}><span>الإجمالي</span><b>{fmt(detail.inv.total)} ج</b></div>
                             <div style={{ display: 'grid', gap: 8, marginTop: 12 }}>
-                                <button className="btn btn-blue btn-block" onClick={() => setPrintJob({ ...detail, mode: 'r80' })}>🖨️ طباعة إيصال (80مم)</button>
-                                <button className="btn btn-ghost btn-block" onClick={() => setPrintJob({ ...detail, mode: 'a4' })}>📄 طباعة / PDF (A4)</button>
+                                {uip.r80 ? <button className="btn btn-blue btn-block" onClick={() => setPrintJob({ ...detail, mode: 'r80' })}>🖨️ طباعة إيصال (80مم)</button> : null}
+                                {uip.pdf ? <button className="btn btn-ghost btn-block" onClick={() => setPrintJob({ ...detail, mode: 'a4' })}>📄 طباعة / PDF (A4)</button> : null}
                                 <BtPrint inv={detail.inv} items={detail.items} logo={logo} notify={notify} />
-                                <button className="btn btn-wa btn-block" onClick={() => waShare(detail.inv, detail.items)}>إرسال واتساب</button>
+                                {uip.wa ? <button className="btn btn-wa btn-block" onClick={() => waShare(detail.inv, detail.items)}>إرسال واتساب</button> : null}
                                 <SharePdf inv={detail.inv} items={detail.items} logo={logo} notify={notify} />
                                 {manager && detail.inv.status !== 'voided' ? <button className="btn btn-danger btn-block" onClick={() => voidInvoice(detail.inv.id)}>إلغاء الفاتورة</button> : null}
                             </div>
