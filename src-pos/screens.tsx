@@ -587,7 +587,7 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
     const s = dq.trim().toLowerCase();
     useEffect(() => { setShown(PAGE_N); }, [s]);
     const filtered = useMemo(() => (s ? list.filter((c) => c.name.toLowerCase().includes(s) || (c.phone || '').includes(s)) : list), [list, s]);
-    const totalDebt = useMemo(() => list.reduce((a, c) => a + (c.balance || 0), 0), [list]);
+    const totalDebt = useMemo(() => list.reduce((a, c) => a + Math.max(0, c.balance || 0), 0), [list]);
 
     return (
         <>
@@ -610,7 +610,7 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
                         <div className="m">{c.phone || 'بدون تليفون'}</div>
                     </div>
                     <span style={{ marginInlineStart: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
-                        {(c.balance || 0) > 0 ? <span className="badge vcash" style={{ fontSize: 13 }}>عليه {fmt(c.balance!)} ج</span> : <span className="badge cash">صفر</span>}
+                        {(c.balance || 0) > 0 ? <span className="badge vcash" style={{ fontSize: 13 }}>عليه {fmt(c.balance!)} ج</span> : (c.balance || 0) < 0 ? <span className="badge cash" style={{ fontSize: 13 }}>له {fmt(-(c.balance as number))} ج</span> : <span className="badge cash">صفر</span>}
                     </span>
                 </button>
             ))}
@@ -667,14 +667,14 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
 
                             {!editMode && !detail.loading ? (
                                 <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
-                                    {startDebtInvoice ? <button className="btn btn-blue btn-sm" style={{ minHeight: 44 }} onClick={() => { const id = detail.customer.id; setDetail(null); startDebtInvoice(id); }}>🧾 فاتورة آجل جديدة</button> : null}
-                                    {manager ? <button className="btn btn-ghost btn-sm" style={{ minHeight: 44 }} onClick={() => setDebtOpen((v) => !v)}>➕ إضافة مديونية سابقة</button> : null}
+                                    {startDebtInvoice ? <button className="btn btn-blue btn-sm" style={{ minHeight: 44 }} onClick={() => { const id = detail.customer.id; setDetail(null); startDebtInvoice(id); }}>فاتورة آجل جديدة</button> : null}
+                                    {manager ? <button className="btn btn-ghost btn-sm" style={{ minHeight: 44 }} onClick={() => setDebtOpen((v) => !v)}>+ إضافة مديونية سابقة</button> : null}
                                 </div>
                             ) : null}
 
                             {debtOpen && manager && !editMode && !detail.loading ? (
                                 <div className="close-card">
-                                    <h4>📒 مديونية سابقة</h4>
+                                    <h4>مديونية سابقة</h4>
                                     <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 8 }}>بتتسجل في كشف الحساب كرصيد سابق من غير فاتورة، ومش بتدخل في المبيعات.</div>
                                     <div className="field"><input inputMode="decimal" placeholder="المبلغ" value={debtAmt} onChange={(e) => setDebtAmt(e.target.value)} /></div>
                                     <div className="field"><input placeholder="ملاحظة (اختياري)" maxLength={150} value={debtNote} onChange={(e) => setDebtNote(e.target.value)} /></div>
@@ -707,7 +707,7 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
                             <h4 style={{ color: 'var(--navy)', margin: '14px 0 8px' }}>كشف الحساب</h4>
                             {detail.loading ? <div className="empty" style={{ padding: 16 }}>جاري تحميل الحركات…</div> : detail.ledger.length === 0 ? <div className="empty" style={{ padding: 16 }}>مفيش حركات</div> : detail.ledger.map((l) => (
                                 <div className="close-line" key={l.id}>
-                                    <span>{l.kind === 'charge' ? (l.invoice_id ? '🧾 فاتورة' : '📒 مديونية') : '💵 دفعة'} · {fmtTime(l.ts)} · {l.staff}{l.note ? ' · ' + l.note : ''}</span>
+                                    <span>{l.kind === 'charge' ? (l.invoice_id ? 'فاتورة' : 'مديونية سابقة') : '💵 دفعة'} · {fmtTime(l.ts)} · {l.staff}{l.note ? ' · ' + l.note : ''}</span>
                                     <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
                                         <b style={{ color: l.kind === 'charge' ? 'var(--danger)' : '#0f7a44' }}>{l.kind === 'charge' ? '+' : '-'}{fmt(l.amount)}</b>
                                         {manager && (l.kind === 'payment' || !l.invoice_id) ? <button className="btn btn-danger btn-sm" style={{ padding: '3px 8px', fontSize: 12 }} onClick={() => delPayment(l.id)}>×</button> : null}
