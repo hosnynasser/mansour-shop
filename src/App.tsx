@@ -575,7 +575,7 @@ function CartPage({ onClose, cust, setCust }: { onClose: () => void; cust: Cust;
 }
 
 // ===== لوحة تحكم المدير (صفحة مخفية) =====
-type ApiProduct = { name: string; desc?: string; price: number; code: string; cat: Cat; imgUrl?: string; stock?: boolean; images?: string[]; video?: string };
+type ApiProduct = { name: string; desc?: string; price: number; code: string; cat: Cat; imgUrl?: string; stock?: boolean; images?: string[]; video?: string; hidden?: boolean };
 type ApiOrder = { id: string; ts: string; status: 'new' | 'preparing' | 'done'; customer: { name: string; phone: string; address: string }; lines: { code: string; name: string; price: number; qty: number }[]; total: number };
 
 // ضغط الصورة قبل الرفع: أقصى مقاس 1280 وجودة JPEG ~0.82
@@ -629,6 +629,8 @@ function AdminPage({ onClose }: { onClose: () => void }) {
     const [msg, setMsg] = useState('');
     const [prodQuery, setProdQuery] = useState('');
     const [prodCat, setProdCat] = useState<'الكل' | Cat>('الكل');
+    const [prodVis, setProdVis] = useState<'all' | 'shown' | 'hidden'>('all');
+    const [prodLimit, setProdLimit] = useState(40);
     const [orderStage, setOrderStage] = useState<'new' | 'preparing' | 'done'>('new');
     const [uploading, setUploading] = useState('');
     const [siteForm, setSiteForm] = useState<SiteInfo | null>(null);
@@ -770,8 +772,19 @@ function AdminPage({ onClose }: { onClose: () => void }) {
         .filter((cat) => prodCat === 'الكل' || cat === prodCat)
         .map((cat) => ({
             cat,
-            items: (prods || []).map((p, i) => ({ p, i })).filter(({ p }) => p.cat === cat && (!prodQuery.trim() || normalize(`${p.name} ${p.desc || ''} ${p.code}`).includes(normalize(prodQuery.trim())))),
+            items: (prods || []).map((p, i) => ({ p, i })).filter(({ p }) => p.cat === cat && (prodVis === 'all' || (prodVis === 'hidden' ? p.hidden === true : p.hidden !== true)) && (!prodQuery.trim() || normalize(`${p.name} ${p.desc || ''} ${p.code}`).includes(normalize(prodQuery.trim())))),
         }));
+    const filteredIdx = new Set(prodGroups.flatMap((g) => g.items.map((x) => x.i)));
+    const hiddenCount = (prods || []).filter((p) => p.hidden === true).length;
+    const bulkVisibility = (hide: boolean) => {
+        if (!prods) return;
+        const targets = [...filteredIdx].filter((i) => (prods[i].hidden === true) !== hide);
+        if (!targets.length) { setMsg(hide ? 'مفيش منتجات ظاهرة في القايمة المعروضة.' : 'مفيش منتجات مخفية في القايمة المعروضة.'); return; }
+        if (!confirm(`${hide ? 'إخفاء' : 'نشر على الموقع'} ${targets.length} منتج من القايمة المعروضة (حسب البحث والقسم والفلتر)؟ التغيير مش هيظهر للزباين غير بعد «حفظ التعديلات».`)) return;
+        const set = new Set(targets);
+        setProds(prods.map((x, j) => set.has(j) ? { ...x, hidden: hide ? true : undefined } : x));
+        setMsg(`${hide ? 'اتخفى' : 'اتجهز للنشر'} ${targets.length} منتج. دوس «حفظ التعديلات» عشان يتطبق.`);
+    };
     const stageOrders = (orders || []).filter((o) => o.status === orderStage);
     const stageCount = (s: 'new' | 'preparing' | 'done') => (orders || []).filter((o) => o.status === s).length;
 
@@ -847,10 +860,17 @@ function AdminPage({ onClose }: { onClose: () => void }) {
                 <button type="button" className="btn btn-amber" onClick={saveProducts}>حفظ التعديلات</button>
             </div>
             <label className="field admin-search">دوّر في المنتجات
-                <input value={prodQuery} placeholder="بالاسم أو الكود…" onChange={(e) => setProdQuery(e.target.value)} />
+                <input value={prodQuery} placeholder="بالاسم أو الكود…" onChange={(e) => { setProdQuery(e.target.value); setProdLimit(40); }} />
             </label>
             <div className="admin-tabs ochips">
-                {(['الكل', 'كهرباء', 'أدوات صحية'] as const).map((c) => <button key={c} type="button" className={prodCat === c ? 'atab sel' : 'atab'} onClick={() => setProdCat(c)}>{c}</button>)}
+                {(['الكل', 'كهرباء', 'أدوات صحية'] as const).map((c) => <button key={c} type="button" className={prodCat === c ? 'atab sel' : 'atab'} onClick={() => { setProdCat(c); setProdLimit(40); }}>{c}</button>)}
+            </div>
+            <div className="admin-tabs ochips">
+                {([['all', 'كل الظهور'], ['shown', `ظاهر على الموقع (${num((prods || []).length - hiddenCount)})`], ['hidden', `مخفي (${num(hiddenCount)})`]] as const).map(([k, l]) => <button key={k} type="button" className={prodVis === k ? 'atab sel' : 'atab'} onClick={() => { setProdVis(k); setProdLimit(40); }}>{l}</button>)}
+            </div>
+            <div className="admin-row admin-actions-top">
+                <button type="button" className="btn btn-amber" onClick={() => bulkVisibility(false)}>نشر للموقع ({num([...filteredIdx].filter((i) => prods![i].hidden === true).length)})</button>
+                <button type="button" className="btn btn-ghost" onClick={() => bulkVisibility(true)}>إخفاء من الموقع</button>
             </div>
             {msg && tab === 'products' && <p className="admin-msg">{msg}</p>}
             {!customProds && <p className="admin-note">الموقع شغال دلوقتي بالقايمة المبدئية. أول حفظ هنا هينقلها للباك إند ويبقى التعديل من هنا مباشر.</p>}
@@ -858,13 +878,14 @@ function AdminPage({ onClose }: { onClose: () => void }) {
             {prods !== null && prodGroups.every((g) => !g.items.length) && <p className="admin-note">مفيش منتجات مطابقة للبحث.</p>}
             {prodGroups.map((g) => g.items.length === 0 ? null : <div key={g.cat}>
                 <h3 className="pe-cat-head">{g.cat} ({num(g.items.length)})</h3>
-                {g.items.map(({ p, i }) => <div className="prod-edit" key={i}>
+                {g.items.slice(0, prodLimit).map(({ p, i }) => <div className="prod-edit" key={i}>
                 <div className="pe-grid">
                     <label className="field">الاسم<input value={p.name} onChange={(e) => setProds(prods!.map((x, j) => j === i ? { ...x, name: e.target.value } : x))} /></label>
                     <label className="field">الكود<input dir="ltr" value={p.code} onChange={(e) => setProds(prods!.map((x, j) => j === i ? { ...x, code: e.target.value.toUpperCase() } : x))} /></label>
                     <label className="field">السعر (جنيه)<input type="number" min="0" step="0.5" dir="ltr" value={p.price} onChange={(e) => setProds(prods!.map((x, j) => j === i ? { ...x, price: Number(e.target.value) } : x))} /></label>
                     <label className="field">القسم<select value={p.cat} onChange={(e) => setProds(prods!.map((x, j) => j === i ? { ...x, cat: e.target.value as Cat } : x))}><option>كهرباء</option><option>أدوات صحية</option></select></label>
                     <label className="field pe-wide">الوصف<input value={p.desc || ''} onChange={(e) => setProds(prods!.map((x, j) => j === i ? { ...x, desc: e.target.value } : x))} /></label>
+                    <label className="pe-stock"><input type="checkbox" checked={p.hidden !== true} onChange={(e) => setProds(prods!.map((x, j) => j === i ? { ...x, hidden: e.target.checked ? undefined : true } : x))} /> ظاهر على الموقع</label>
                     <label className="pe-stock"><input type="checkbox" checked={p.stock !== false} onChange={(e) => setProds(prods!.map((x, j) => j === i ? { ...x, stock: e.target.checked } : x))} /> متوفر في المحل</label>
                 </div>
                 <div className="pe-media">
@@ -890,6 +911,7 @@ function AdminPage({ onClose }: { onClose: () => void }) {
                 </div>
                 <button type="button" className="pe-del" onClick={() => setProds(prods!.filter((_, j) => j !== i))}>حذف المنتج</button>
             </div>)}
+            {g.items.length > prodLimit && <button type="button" className="btn btn-ghost" onClick={() => setProdLimit(prodLimit + 60)}>عرض المزيد ({num(g.items.length - prodLimit)} باقي)</button>}
             </div>)}
             <div className="admin-row">
                 <button type="button" className="btn btn-amber" onClick={saveProducts}>حفظ التعديلات</button>
