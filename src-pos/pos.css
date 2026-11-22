@@ -310,3 +310,7 @@ html.dd-lock,html.dd-lock body,html.dd-lock #root,html.dd-lock .pos-main{overflo
 .detail-bar .btn{flex:1;min-height:50px;font-size:16px;font-weight:800;border-radius:12px}
 .db-debt{background:#fde8e8;color:var(--danger)}
 .db-pay{background:#dff5e7;color:#0f7a44}
+
+.sheet-warn{flex:none;background:#fff7e6;border-top:1.5px solid #f0c36d;padding:10px 16px calc(10px + env(safe-area-inset-bottom));font-size:14px;color:#6b4a00}
+.sheet-warn .sw-row{display:flex;gap:8px;margin-top:8px}
+.sheet-warn .btn{flex:1;min-height:42px}

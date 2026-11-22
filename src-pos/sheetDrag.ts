@@ -4,13 +4,60 @@ const ZONE = 64;          // px من أعلى النافذة
 const DISMISS_DY = 110;   // مسافة تقفل
 const DISMISS_V = 0.6;    // سرعة (px/ms) تقفل
 
+// بنحفظ القيمة وقت ما الخانة تظهر في النافذة، والنافذة بتعتبر "فيها تعديل" بس لو قيمة خانة اتغيرت عنها.
+// نوافذ ليها حالة تعديل خاصة بتحط عنصر مخفي data-dirty="1" أو "0" وده اللي بيتحكم لوحده.
+const base = new WeakMap<Element, string>();
+function snap(root: ParentNode) {
+    root.querySelectorAll('input, textarea').forEach((e) => { if (!base.has(e)) base.set(e, (e as HTMLInputElement).value); });
+}
+new MutationObserver((muts) => {
+    for (const m of muts) m.addedNodes.forEach((n) => {
+        if (n.nodeType !== 1) return;
+        const el = n as Element;
+        if (el.matches('input, textarea')) { if (el.closest('.sheet') && !base.has(el)) base.set(el, (el as HTMLInputElement).value); }
+        else if (el.closest('.sheet') || el.matches('.sheet') || el.querySelector('.sheet')) snap(el);
+    });
+}).observe(document.documentElement, { childList: true, subtree: true });
+
 function dirty(sheet: HTMLElement): boolean {
+    const marker = sheet.querySelector('[data-dirty]');
+    if (marker) return marker.getAttribute('data-dirty') === '1';
     const els = sheet.querySelectorAll('input, textarea');
     for (const e of Array.from(els) as (HTMLInputElement | HTMLTextAreaElement)[]) {
-        if (e.type === 'checkbox' || e.type === 'radio' || e.type === 'button' || e.type === 'file') continue;
-        if ((e.value || '').trim() !== '') return true;
+        if (e.type === 'checkbox' || e.type === 'radio' || e.type === 'button' || e.type === 'file' || e.type === 'search') continue;
+        if (e.closest('.search-box')) continue;
+        if (e.value !== (base.has(e) ? base.get(e) : '')) return true;
     }
     return false;
+}
+
+function firstDirty(sheet: HTMLElement): HTMLElement | null {
+    const m = sheet.querySelector('[data-dirty="1"]');
+    if (m) return (sheet.querySelector('.btn-blue') as HTMLElement | null);
+    for (const e of Array.from(sheet.querySelectorAll('input, textarea')) as HTMLInputElement[]) {
+        if (e.type === 'checkbox' || e.type === 'radio' || e.type === 'button' || e.type === 'file' || e.type === 'search' || e.closest('.search-box')) continue;
+        if (e.value !== (base.has(e) ? base.get(e) : '')) return e;
+    }
+    return null;
+}
+
+function warn(sheet: HTMLElement) {
+    if (sheet.querySelector('.sheet-warn')) return;
+    const bar = document.createElement('div');
+    bar.className = 'sheet-warn';
+    const t = document.createElement('div');
+    t.textContent = 'فيه تعديل لسه ما اتحفظش. احفظه بزر «حفظ» الموجود جنبه، أو تجاهله.';
+    const row = document.createElement('div');
+    row.className = 'sw-row';
+    const keep = document.createElement('button');
+    keep.type = 'button'; keep.className = 'btn btn-blue btn-sm'; keep.textContent = 'كمّل التعديل';
+    keep.onclick = () => { bar.remove(); const f = firstDirty(sheet); if (f) { f.scrollIntoView({ block: 'center', behavior: 'smooth' }); if (f.tagName === 'INPUT' || f.tagName === 'TEXTAREA') f.focus(); } };
+    const drop = document.createElement('button');
+    drop.type = 'button'; drop.className = 'btn btn-ghost btn-sm'; drop.textContent = 'تجاهل التعديل';
+    drop.onclick = () => { bar.remove(); close(sheet); };
+    row.append(keep, drop);
+    bar.append(t, row);
+    sheet.append(bar);
 }
 
 let cur: { sheet: HTMLElement; y0: number; t0: number; dy: number; on: boolean } | null = null;
@@ -23,7 +70,11 @@ function reset(sheet: HTMLElement) {
 }
 
 function dismiss(sheet: HTMLElement) {
-    if (dirty(sheet) && !confirm('فيه بيانات مكتوبة لسه ما اتحفظتش. تقفل برضه؟')) { reset(sheet); return; }
+    if (dirty(sheet)) { reset(sheet); warn(sheet); return; }
+    close(sheet);
+}
+
+function close(sheet: HTMLElement) {
     sheet.style.transition = 'transform .18s ease-in';
     sheet.style.transform = 'translateY(105%)';
     const back = (sheet.previousElementSibling as HTMLElement | null);

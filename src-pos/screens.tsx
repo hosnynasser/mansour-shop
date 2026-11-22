@@ -227,6 +227,7 @@ export function StockScreen({ staff, products, categories, refresh, notify }: { 
 
     const [minEdit, setMinEdit] = useState<Record<string, string>>({});
     const [stOpen, setStOpen] = useState(false);
+    useEffect(() => { if (!stOpen) setMinEdit({}); }, [stOpen]);
     const [stQ, setStQ] = useState('');
     const [setShownN, setSetShownN] = useState(60);
     const [minBusy, setMinBusy] = useState('');
@@ -261,15 +262,16 @@ export function StockScreen({ staff, products, categories, refresh, notify }: { 
         setBusy('');
     };
     const low = useMemo(() => products.filter((p) => p.qty <= ((p as any).min_qty ?? 5)), [products]);
+    const minDirty = useMemo(() => products.some((p) => minEdit[p.code] !== undefined && minEdit[p.code] !== String((p as any).min_qty ?? 5)), [products, minEdit]);
 
     return (
         <>
             <div className="search-wrap" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                {manager ? <button className="btn btn-ghost btn-sm" style={{ minHeight: 46, flex: '0 0 auto', display: 'flex', alignItems: 'center', gap: 6 }} onClick={() => setStOpen(true)} title="إعدادات المخزون"><Icon n="settings" size={20} /> الإعدادات</button> : null}
                 <div className="search-box" style={{ flex: 1 }}>
                     <span className="si"><Icon n="search" size={20} /></span>
                     <input placeholder="ابحث بالاسم أو الكود…" value={q} onChange={(e) => setQ(e.target.value)} />
                 </div>
+                {manager ? <button className="btn btn-ghost btn-sm" style={{ minHeight: 46, flex: '0 0 auto', display: 'flex', alignItems: 'center', gap: 6 }} onClick={() => setStOpen(true)} title="إعدادات المخزون"><Icon n="settings" size={20} /> الإعدادات</button> : null}
             </div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
                 <CatChips categories={categories} sel={catSel} setSel={(c) => { setCatSel(c); setLowOnly(false); }} products={products} />
@@ -318,6 +320,7 @@ export function StockScreen({ staff, products, categories, refresh, notify }: { 
                     <div className="sheet">
                         <div className="sheet-h"><h3>إعدادات المخزون</h3><button className="btn btn-ghost btn-sm" style={{ marginInlineStart: 'auto' }} onClick={() => setStOpen(false)}>قفل</button></div>
                         <div className="sheet-b">
+                            <span hidden data-dirty={minDirty ? '1' : '0'} />
                             <h4 style={{ margin: '0 0 4px' }}>حد النواقص</h4>
                             <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 8 }}>لو رصيد الصنف وصل للرقم ده أو أقل، بيدخل في النواقص. القيم الحالية زي ما هي، وبتتغير هنا بس.</div>
                             <div className="search-box" style={{ padding: '7px 12px', marginBottom: 8 }}>
