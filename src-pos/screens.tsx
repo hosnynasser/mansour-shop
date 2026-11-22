@@ -469,6 +469,16 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
     const [busy, setBusy] = useState(false);
     const [detail, setDetail] = useState<{ customer: Customer; ledger: LedgerEntry[]; balance: number; invoices: any[]; points?: number; pointsLog?: any[]; loyalty?: Loyalty; loading?: boolean } | null>(null);
     const reqRef = useRef(0);
+    const inflight = useRef(false);
+    const keys = useRef<Record<string, { sig: string; key: string }>>({});
+    // نفس المفتاح بيتبعت لو الطلب اتعاد (ضغطة مزدوجة أو نت ضعيف) فالقيد مبيتسجلش مرتين
+    const keyFor = (kind: string, sig: string) => {
+        const k = keys.current[kind];
+        if (k && k.sig === sig) return k.key;
+        const key = (crypto as any).randomUUID ? crypto.randomUUID() : Date.now() + '-' + Math.random().toString(36).slice(2);
+        keys.current[kind] = { sig, key };
+        return key;
+    };
     const dcache = useRef<Map<number, any>>(new Map());
     const prefetch = (id: number) => { if (dcache.current.has(id)) return; dcache.current.set(id, api('/api/pos/customer/' + id).catch(() => null)); };
     const [debtOpen, setDebtOpen] = useState(false);
@@ -523,12 +533,16 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
         const amt = Number(payAmt) || 0;
         if (!detail || amt <= 0) { notify('اكتب مبلغ صحيح', true); return; }
         if (amt > detail.balance + 0.005 && !confirm(`المبلغ (${fmt(amt)}) أكبر من المستحق (${fmt(detail.balance)}). تسجله برضه؟ هيبقى للعميل رصيد دائن.`)) return;
+        if (inflight.current) return;
+        inflight.current = true;
         setBusy(true);
         try {
-            await api(`/api/pos/customer/${detail.customer.id}/payment`, 'POST', { amount: amt, method: payMethod });
+            await api(`/api/pos/customer/${detail.customer.id}/payment`, 'POST', { amount: amt, method: payMethod, key: keyFor('pay', `${detail.customer.id}|${amt}|${payMethod}`) });
+            delete keys.current.pay;
             notify('اتسجلت الدفعة ✓'); setPayAmt('');
             refreshDetail(detail.customer.id);
         } catch { notify('مشكلة في تسجيل الدفعة', true); }
+        inflight.current = false;
         setBusy(false);
     };
     const saveEdit = async () => {
@@ -551,12 +565,16 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
         const amt = Number(debtAmt) || 0;
         if (!detail || amt <= 0) { notify('اكتب مبلغ صحيح', true); return; }
         if (!confirm(`تسجيل مديونية سابقة ${fmt(amt)} ج على ${detail.customer.name}؟`)) return;
+        if (inflight.current) return;
+        inflight.current = true;
         setBusy(true);
         try {
-            await api(`/api/pos/customer/${detail.customer.id}/debt`, 'POST', { amount: amt, note: debtNote.trim() });
+            await api(`/api/pos/customer/${detail.customer.id}/debt`, 'POST', { amount: amt, note: debtNote.trim(), key: keyFor('debt', `${detail.customer.id}|${amt}|${debtNote.trim()}`) });
+            delete keys.current.debt;
             notify('اتسجلت المديونية ✓'); setDebtAmt(''); setDebtNote(''); setDebtOpen(false);
             await refreshDetail(detail.customer.id);
         } catch { notify('مشكلة في تسجيل المديونية', true); }
+        inflight.current = false;
         setBusy(false);
     };
     const delPayment = async (id: number) => {

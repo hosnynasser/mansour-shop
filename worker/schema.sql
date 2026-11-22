@@ -159,3 +159,7 @@ CREATE TABLE IF NOT EXISTS prod_cat (code TEXT PRIMARY KEY, cat TEXT);
 CREATE TABLE IF NOT EXISTS pos_hidden (code TEXT PRIMARY KEY);
 
 CREATE TABLE IF NOT EXISTS owner_cred (id INTEGER PRIMARY KEY, user TEXT NOT NULL, hash TEXT NOT NULL);
+
+-- idempotency key for manual debt/payment retries
+ALTER TABLE ledger ADD COLUMN idem TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ledger_idem ON ledger(idem) WHERE idem IS NOT NULL;

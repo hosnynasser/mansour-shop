@@ -689,8 +689,11 @@ async function handlePos(request, env, path) {
         const ts = new Date().toISOString();
         let day = ts.slice(0, 10);
         try { day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()); } catch {}
-        await env.POS_DB.prepare("INSERT INTO ledger (customer_id, ts, day, kind, amount, invoice_id, staff, note) VALUES (?, ?, ?, 'payment', ?, NULL, ?, ?)")
-            .bind(id, ts, day, amount, staff.user, clean(body.note, 200)).run();
+        const idem = clean(body.key, 64) || null;
+        try {
+            await env.POS_DB.prepare("INSERT INTO ledger (customer_id, ts, day, kind, amount, invoice_id, staff, note, idem) VALUES (?, ?, ?, 'payment', ?, NULL, ?, ?, ?)")
+                .bind(id, ts, day, amount, staff.user, clean(body.note, 200), idem).run();
+        } catch (e) { if (!(idem && /UNIQUE/i.test(String(e?.message || e)))) throw e; /* نفس الطلب اتبعت قبل كده: متتسجلش مرتين */ }
         const bal = await env.POS_DB.prepare("SELECT COALESCE(SUM(CASE WHEN kind = 'charge' THEN amount ELSE -amount END), 0) AS b FROM ledger WHERE customer_id = ?").bind(id).first();
         return json({ ok: true, balance: bal?.b ?? 0 });
     }
@@ -709,8 +712,11 @@ async function handlePos(request, env, path) {
         let day = ts.slice(0, 10);
         try { day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()); } catch {}
         const extra = clean(body.note, 150);
-        await env.POS_DB.prepare("INSERT INTO ledger (customer_id, ts, day, kind, amount, invoice_id, staff, note) VALUES (?, ?, ?, 'charge', ?, NULL, ?, ?)")
-            .bind(id, ts, day, amount, staff.user, 'رصيد سابق' + (extra ? ' · ' + extra : '')).run();
+        const idem = clean(body.key, 64) || null;
+        try {
+            await env.POS_DB.prepare("INSERT INTO ledger (customer_id, ts, day, kind, amount, invoice_id, staff, note, idem) VALUES (?, ?, ?, 'charge', ?, NULL, ?, ?, ?)")
+                .bind(id, ts, day, amount, staff.user, 'رصيد سابق' + (extra ? ' · ' + extra : ''), idem).run();
+        } catch (e) { if (!(idem && /UNIQUE/i.test(String(e?.message || e)))) throw e; }
         const bal = await env.POS_DB.prepare("SELECT COALESCE(SUM(CASE WHEN kind = 'charge' THEN amount ELSE -amount END), 0) AS b FROM ledger WHERE customer_id = ?").bind(id).first();
         return json({ ok: true, balance: bal?.b ?? 0 });
     }
