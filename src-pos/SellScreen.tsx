@@ -280,7 +280,6 @@ export default function SellScreen({
                         </div>
                         <div className="sheet-b">
                             <span data-dirty="0" hidden />
-                            {pendBanner}
                             <fieldset disabled={!!pend} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
                             {cart.map((l) => (
                                 <div className="cline" key={l.code}>
