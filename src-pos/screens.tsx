@@ -635,6 +635,12 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
                     <div className="sheet-back" onClick={() => setDetail(null)} />
                     <div className="sheet">
                         <div className="sheet-h">
+                            {manager && !editMode && !detail.loading ? (
+                                <>
+                                    <button className="btn btn-ghost btn-sm" onClick={() => setEditMode(true)}>تعديل</button>
+                                    <button className="btn btn-danger btn-sm" onClick={del}>مسح</button>
+                                </>
+                            ) : null}
                             <h3>{detail.customer.name}</h3>
                             <button className="btn btn-ghost btn-sm" style={{ marginInlineStart: 'auto' }} onClick={() => setDetail(null)}>قفل</button>
                         </div>
@@ -656,25 +662,20 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
                                         <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 8 }}>الرصيد المستحق</div>
                                         <div style={{ fontSize: 30, fontWeight: 800, color: detail.balance > 0 ? 'var(--danger)' : 'var(--ink)' }}>{fmt(detail.balance)} ج</div>
                                     </div>
-                                    {manager && !detail.loading ? (
-                                        <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-                                            <button className="btn btn-ghost btn-sm" onClick={() => setEditMode(true)}>✏️ تعديل</button>
-                                            <button className="btn btn-danger btn-sm" onClick={del}>مسح العميل</button>
-                                        </div>
-                                    ) : null}
+                                    
                                 </>
                             )}
 
                             {!editMode && !detail.loading ? (
                                 <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
                                     {startDebtInvoice ? <button className="btn btn-blue btn-sm" style={{ minHeight: 44 }} onClick={() => { const id = detail.customer.id; setDetail(null); startDebtInvoice(id); }}>فاتورة آجل جديدة</button> : null}
-                                    {manager ? <button className="btn btn-ghost btn-sm" style={{ minHeight: 44 }} onClick={() => setDebtOpen((v) => !v)}>+ إضافة مديونية سابقة</button> : null}
+                                    {manager ? <button className="btn btn-ghost btn-sm" style={{ minHeight: 44 }} onClick={() => setDebtOpen((v) => !v)}>+ إضافة دين</button> : null}
                                 </div>
                             ) : null}
 
                             {debtOpen && manager && !editMode && !detail.loading ? (
                                 <div className="close-card">
-                                    <h4>مديونية سابقة</h4>
+                                    <h4>إضافة دين</h4>
                                     <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 8 }}>بتتسجل في كشف الحساب كرصيد سابق من غير فاتورة، ومش بتدخل في المبيعات.</div>
                                     <div className="field"><input inputMode="decimal" placeholder="المبلغ" value={debtAmt} onChange={(e) => setDebtAmt(e.target.value)} /></div>
                                     <div className="field"><input placeholder="ملاحظة (اختياري)" maxLength={150} value={debtNote} onChange={(e) => setDebtNote(e.target.value)} /></div>
@@ -686,13 +687,14 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
                             ) : null}
 
                             {detail.balance <= 0 && !editMode && !detail.loading ? (
-                                <div className="close-card"><h4>💵 تسجيل دفعة</h4><div style={{ fontSize: 13, color: 'var(--muted)' }}>مفيش مديونية على العميل دلوقتي. لو عليه فلوس قديمة، {manager ? 'اضغط «إضافة مديونية سابقة» الأول' : 'المدير يضيفها الأول'}، أو سجّل فاتورة آجل.</div></div>
+                                <div className="close-card"><h4>💵 تسجيل دفعة</h4><div style={{ fontSize: 13, color: 'var(--muted)' }}>مفيش دين على العميل دلوقتي. لو عليه فلوس قديمة، {manager ? 'اضغط «إضافة دين» الأول' : 'المدير يضيفها الأول'}، أو سجّل فاتورة آجل.</div></div>
                             ) : null}
 
                             {detail.balance > 0 && !editMode && !detail.loading ? (
                                 <div className="close-card">
-                                    <h4>💵 تسجيل دفعة</h4>
+                                    <h4>💵 تسجيل دفعة (بتتخصم من الدين)</h4>
                                     <div className="field"><input inputMode="decimal" placeholder="المبلغ" value={payAmt} onChange={(e) => setPayAmt(e.target.value)} /></div>
+                                    {Number(payAmt) > 0 ? <div style={{ fontSize: 13, color: 'var(--muted)', margin: '-4px 0 8px' }}>الباقي بعد الدفعة: <b>{fmt(Math.max(0, detail.balance - Number(payAmt)))} ج</b></div> : null}
                                     <div className="pay-toggle" style={{ marginBottom: 10 }}>
                                         <button className={payMethod === 'cash' ? 'on' : ''} onClick={() => setPayMethod('cash')}>💵 كاش</button>
                                         <button className={payMethod === 'vcash' ? 'on' : ''} onClick={() => setPayMethod('vcash')}>📱 فودافون كاش</button>
