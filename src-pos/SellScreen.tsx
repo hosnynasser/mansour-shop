@@ -145,7 +145,7 @@ export default function SellScreen({
         try {
             const r = await api('/api/pos/quotes', 'POST', {
                 items: cart.map((l) => ({ code: l.code, qty: l.qty, discount: l.discount })),
-                discount: disc0, customerName: custName.trim(), customerPhone: custPhone.trim(),
+                discount: disc0, customerName: custName.trim() || selCust?.name || '', customerPhone: custPhone.trim() || selCust?.phone || '',
             });
             setCart([]); setCartOpen(false); setInvDisc(''); setCustName(''); setCustPhone(''); setCustId(0); setCustQ('');
             notify('اتحفظ عرض السعر ' + r.num + ' ✓');
@@ -301,12 +301,7 @@ export default function SellScreen({
                                 {fold('خصم على الفاتورة كلها (جنيه)', discOpen, setDiscOpen, invDisc.trim() ? invDisc.trim() + ' ج' : '', (
                                     <input inputMode="decimal" value={invDisc} onChange={(e) => setInvDisc(e.target.value)} placeholder="0" style={{ marginTop: 5 }} />
                                 ))}
-                                {quoteMode ? (
-                                    <div className="field">
-                                        <label>اسم العميل (اختياري)</label>
-                                        <input value={custName} onChange={(e) => setCustName(e.target.value)} placeholder="اسم العميل" />
-                                    </div>
-                                ) : (
+                                {(
                                 <div className="field">
                                     <label>اسم العميل{payment === 'debt' ? '' : ' (اختياري)'}</label>
                                     <div style={{ position: 'relative', marginBottom: 12 }}>
@@ -316,12 +311,14 @@ export default function SellScreen({
                                         </button>
                                         {custId ? <button className="btn btn-ghost btn-sm" style={{ position: 'absolute', left: 56, top: 5, bottom: 5, minHeight: 0, padding: '0 10px' }} onClick={() => { setCustId(0); setPickOpen(false); }}>شيل</button> : null}
                                     </div>
+                                    {!quoteMode ? (<>
                                     <label>طريقة الدفع</label>
                                     <div className="pay-toggle">
                                         <button className={payment === 'cash' ? 'on' : ''} onClick={() => setPayment('cash')}>💵 كاش</button>
                                         <button className={payment === 'vcash' ? 'on' : ''} onClick={() => setPayment('vcash')}>📱 فودافون كاش</button>
                                         <button className={payment === 'debt' ? 'on' : ''} onClick={pickDebt}>🧾 آجل</button>
                                     </div>
+                                    </>) : null}
                                     {payment === 'debt' || pickOpen ? (
                                         <div style={{ marginTop: 10, border: '1.5px dashed var(--amber)', borderRadius: 12, padding: 10 }}>
                                             <label style={{ fontSize: 13, fontWeight: 700, color: 'var(--navy)' }}>{payment === 'debt' ? 'اختار العميل (مطلوب للآجل)' : 'اختار العميل'}</label>
