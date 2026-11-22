@@ -458,7 +458,7 @@ export function StaffScreen({ me, notify }: { me: Staff; notify: (m: string, b?:
 }
 
 // ---------- العملاء والمديونيات ----------
-export function CustomersScreen({ staff, openInvoice, notify }: { staff: Staff; openInvoice: (id: number) => void; notify: (m: string, b?: boolean) => void }) {
+export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }: { staff: Staff; openInvoice: (id: number) => void; notify: (m: string, b?: boolean) => void; startDebtInvoice?: (id: number) => void }) {
     const manager = staff.role === 'manager';
     const [list, setList] = useState<Customer[]>([]);
     const [q, setQ] = useState('');
@@ -471,6 +471,9 @@ export function CustomersScreen({ staff, openInvoice, notify }: { staff: Staff; 
     const reqRef = useRef(0);
     const dcache = useRef<Map<number, any>>(new Map());
     const prefetch = (id: number) => { if (dcache.current.has(id)) return; dcache.current.set(id, api('/api/pos/customer/' + id).catch(() => null)); };
+    const [debtOpen, setDebtOpen] = useState(false);
+    const [debtAmt, setDebtAmt] = useState('');
+    const [debtNote, setDebtNote] = useState('');
     const [payAmt, setPayAmt] = useState('');
     const [payMethod, setPayMethod] = useState<'cash' | 'vcash'>('cash');
     const [editMode, setEditMode] = useState(false);
@@ -487,7 +490,7 @@ export function CustomersScreen({ staff, openInvoice, notify }: { staff: Staff; 
     const openDetail = async (id: number) => {
         const row = list.find((c) => c.id === id);
         const my = ++reqRef.current;
-        setPayAmt(''); setEditMode(false);
+        setPayAmt(''); setEditMode(false); setDebtOpen(false); setDebtAmt(''); setDebtNote('');
         if (row) setDetail({ customer: { ...row, phone: row.phone || '', notes: row.notes || '' } as Customer, ledger: [], balance: row.balance || 0, invoices: [], loading: true });
         const pending = dcache.current.get(id);
         dcache.current.delete(id);
@@ -519,6 +522,7 @@ export function CustomersScreen({ staff, openInvoice, notify }: { staff: Staff; 
     const savePayment = async () => {
         const amt = Number(payAmt) || 0;
         if (!detail || amt <= 0) { notify('اكتب مبلغ صحيح', true); return; }
+        if (amt > detail.balance + 0.005 && !confirm(`المبلغ (${fmt(amt)}) أكبر من المستحق (${fmt(detail.balance)}). تسجله برضه؟ هيبقى للعميل رصيد دائن.`)) return;
         setBusy(true);
         try {
             await api(`/api/pos/customer/${detail.customer.id}/payment`, 'POST', { amount: amt, method: payMethod });
@@ -543,8 +547,20 @@ export function CustomersScreen({ staff, openInvoice, notify }: { staff: Staff; 
             setDetail(null); notify('اتمسح ✓'); load();
         } catch (e: any) { notify(e?.data?.error === 'has_ledger' ? 'العميل عليه حساب، مينفعش يتمسح' : 'مشكلة في المسح', true); }
     };
+    const saveDebt = async () => {
+        const amt = Number(debtAmt) || 0;
+        if (!detail || amt <= 0) { notify('اكتب مبلغ صحيح', true); return; }
+        if (!confirm(`تسجيل مديونية سابقة ${fmt(amt)} ج على ${detail.customer.name}؟`)) return;
+        setBusy(true);
+        try {
+            await api(`/api/pos/customer/${detail.customer.id}/debt`, 'POST', { amount: amt, note: debtNote.trim() });
+            notify('اتسجلت المديونية ✓'); setDebtAmt(''); setDebtNote(''); setDebtOpen(false);
+            await refreshDetail(detail.customer.id);
+        } catch { notify('مشكلة في تسجيل المديونية', true); }
+        setBusy(false);
+    };
     const delPayment = async (id: number) => {
-        if (!detail || !confirm('تمسح قيد الدفعة دي؟')) return;
+        if (!detail || !confirm('تمسح القيد ده؟ هيتعدّل رصيد العميل.')) return;
         try { await api('/api/pos/ledger/' + id, 'DELETE'); refreshDetail(detail.customer.id); notify('اتمسح القيد ✓'); }
         catch { notify('مشكلة في المسح', true); }
     };
@@ -631,6 +647,30 @@ export function CustomersScreen({ staff, openInvoice, notify }: { staff: Staff; 
                                 </>
                             )}
 
+                            {!editMode && !detail.loading ? (
+                                <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+                                    {startDebtInvoice ? <button className="btn btn-blue btn-sm" style={{ minHeight: 44 }} onClick={() => { const id = detail.customer.id; setDetail(null); startDebtInvoice(id); }}>🧾 فاتورة آجل جديدة</button> : null}
+                                    {manager ? <button className="btn btn-ghost btn-sm" style={{ minHeight: 44 }} onClick={() => setDebtOpen((v) => !v)}>➕ إضافة مديونية سابقة</button> : null}
+                                </div>
+                            ) : null}
+
+                            {debtOpen && manager && !editMode && !detail.loading ? (
+                                <div className="close-card">
+                                    <h4>📒 مديونية سابقة</h4>
+                                    <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 8 }}>بتتسجل في كشف الحساب كرصيد سابق من غير فاتورة، ومش بتدخل في المبيعات.</div>
+                                    <div className="field"><input inputMode="decimal" placeholder="المبلغ" value={debtAmt} onChange={(e) => setDebtAmt(e.target.value)} /></div>
+                                    <div className="field"><input placeholder="ملاحظة (اختياري)" maxLength={150} value={debtNote} onChange={(e) => setDebtNote(e.target.value)} /></div>
+                                    <div style={{ display: 'flex', gap: 8 }}>
+                                        <button className="btn btn-blue btn-sm" disabled={busy} onClick={saveDebt}>تسجيل المديونية</button>
+                                        <button className="btn btn-ghost btn-sm" onClick={() => setDebtOpen(false)}>إلغاء</button>
+                                    </div>
+                                </div>
+                            ) : null}
+
+                            {detail.balance <= 0 && !editMode && !detail.loading ? (
+                                <div className="close-card"><h4>💵 تسجيل دفعة</h4><div style={{ fontSize: 13, color: 'var(--muted)' }}>مفيش مديونية على العميل دلوقتي. لو عليه فلوس قديمة، {manager ? 'اضغط «إضافة مديونية سابقة» الأول' : 'المدير يضيفها الأول'}، أو سجّل فاتورة آجل.</div></div>
+                            ) : null}
+
                             {detail.balance > 0 && !editMode && !detail.loading ? (
                                 <div className="close-card">
                                     <h4>💵 تسجيل دفعة</h4>
@@ -649,10 +689,10 @@ export function CustomersScreen({ staff, openInvoice, notify }: { staff: Staff; 
                             <h4 style={{ color: 'var(--navy)', margin: '14px 0 8px' }}>كشف الحساب</h4>
                             {detail.loading ? <div className="empty" style={{ padding: 16 }}>جاري تحميل الحركات…</div> : detail.ledger.length === 0 ? <div className="empty" style={{ padding: 16 }}>مفيش حركات</div> : detail.ledger.map((l) => (
                                 <div className="close-line" key={l.id}>
-                                    <span>{l.kind === 'charge' ? '🧾 فاتورة' : '💵 دفعة'} · {fmtTime(l.ts)} · {l.staff}{l.note ? ' · ' + l.note : ''}</span>
+                                    <span>{l.kind === 'charge' ? (l.invoice_id ? '🧾 فاتورة' : '📒 مديونية') : '💵 دفعة'} · {fmtTime(l.ts)} · {l.staff}{l.note ? ' · ' + l.note : ''}</span>
                                     <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
                                         <b style={{ color: l.kind === 'charge' ? 'var(--danger)' : '#0f7a44' }}>{l.kind === 'charge' ? '+' : '-'}{fmt(l.amount)}</b>
-                                        {manager && l.kind === 'payment' ? <button className="btn btn-danger btn-sm" style={{ padding: '3px 8px', fontSize: 12 }} onClick={() => delPayment(l.id)}>×</button> : null}
+                                        {manager && (l.kind === 'payment' || !l.invoice_id) ? <button className="btn btn-danger btn-sm" style={{ padding: '3px 8px', fontSize: 12 }} onClick={() => delPayment(l.id)}>×</button> : null}
                                     </span>
                                 </div>
                             ))}

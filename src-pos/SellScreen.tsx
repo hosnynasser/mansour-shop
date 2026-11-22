@@ -7,8 +7,10 @@ import CatChips from './CatChips';
 import { Loyalty } from './LoyaltyUI';
 
 export default function SellScreen({
-    products, categories, onDone, onNeedRefresh, notify,
+    products, categories, onDone, onNeedRefresh, notify, presetCust, onPresetUsed,
 }: {
+    presetCust?: number;
+    onPresetUsed?: () => void;
     products: Product[];
     categories: string[];
     onDone: (inv: Invoice, items: { code: string; name: string; price: number; qty: number; discount: number; line_total: number }[]) => void;
@@ -92,6 +94,20 @@ export default function SellScreen({
             try { const r = await api('/api/pos/customers'); setCustomers(r.customers || []); } catch { notify('مشكلة في تحميل العملاء', true); setCustomers([]); }
         }
     };
+    // جاي من كارت العميل: افتح آجل على العميل ده
+    useEffect(() => {
+        if (!presetCust) return;
+        (async () => {
+            setPayment('debt'); if (cart.length) setCartOpen(true);
+            let list = customers;
+            if (list === null) {
+                try { const r = await api('/api/pos/customers'); list = r.customers || []; setCustomers(list); } catch { notify('مشكلة في تحميل العملاء', true); list = []; setCustomers([]); }
+            }
+            const pc = (list || []).find((c) => c.id === presetCust);
+            if (pc) { setCustId(presetCust); if (!cart.length) notify('العميل ' + pc.name + ' متحدد للآجل. ضيف الأصناف وبعدين افتح السلة'); }
+            onPresetUsed && onPresetUsed();
+        })();
+    }, [presetCust]);
     const quickAddCustomer = async () => {
         if (newCustName.trim().length < 2) { notify('اكتب اسم العميل', true); return; }
         try {

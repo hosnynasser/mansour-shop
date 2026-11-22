@@ -287,3 +287,4 @@ html.dd-lock,html.dd-lock body,html.dd-lock #root,html.dd-lock .pos-main{overflo
 
 .inv-row,.stock-row,.prod-card,.cat-dd-btn{touch-action:manipulation;cursor:pointer}
 .inv-row{min-height:60px}
+.sheet-h{touch-action:none}.sheet{overscroll-behavior:contain}

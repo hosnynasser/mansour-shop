@@ -695,11 +695,31 @@ async function handlePos(request, env, path) {
         return json({ ok: true, balance: bal?.b ?? 0 });
     }
 
+    // إضافة مديونية سابقة على عميل (مدير فقط): قيد "رصيد سابق" من غير فاتورة، بيظهر في كشف الحساب وفي إجمالي المديونيات
+    if (path.startsWith('/api/pos/customer/') && path.endsWith('/debt') && request.method === 'POST') {
+        if (!manager) return json({ error: 'forbidden' }, 403);
+        const id = parseInt(path.slice('/api/pos/customer/'.length, -'/debt'.length), 10) || 0;
+        let body;
+        try { body = await request.json(); } catch { return json({ error: 'bad_json' }, 400); }
+        const amount = Math.round((Number(body.amount) || 0) * 100) / 100;
+        if (amount <= 0 || amount > 1e7) return json({ error: 'bad_amount' }, 400);
+        const customer = await env.POS_DB.prepare('SELECT id FROM customers WHERE id = ?').bind(id).first();
+        if (!customer) return json({ error: 'not_found' }, 404);
+        const ts = new Date().toISOString();
+        let day = ts.slice(0, 10);
+        try { day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()); } catch {}
+        const extra = clean(body.note, 150);
+        await env.POS_DB.prepare("INSERT INTO ledger (customer_id, ts, day, kind, amount, invoice_id, staff, note) VALUES (?, ?, ?, 'charge', ?, NULL, ?, ?)")
+            .bind(id, ts, day, amount, staff.user, 'رصيد سابق' + (extra ? ' · ' + extra : '')).run();
+        const bal = await env.POS_DB.prepare("SELECT COALESCE(SUM(CASE WHEN kind = 'charge' THEN amount ELSE -amount END), 0) AS b FROM ledger WHERE customer_id = ?").bind(id).first();
+        return json({ ok: true, balance: bal?.b ?? 0 });
+    }
+
     // حذف قيد دفعة غلط (مدير فقط)
     if (path.startsWith('/api/pos/ledger/') && request.method === 'DELETE') {
         if (!manager) return json({ error: 'forbidden' }, 403);
         const id = parseInt(path.slice('/api/pos/ledger/'.length), 10) || 0;
-        await env.POS_DB.prepare("DELETE FROM ledger WHERE id = ? AND kind = 'payment'").bind(id).run();
+        await env.POS_DB.prepare("DELETE FROM ledger WHERE id = ? AND (kind = 'payment' OR (kind = 'charge' AND invoice_id IS NULL))").bind(id).run();
         return json({ ok: true });
     }
 

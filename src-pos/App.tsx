@@ -152,6 +152,7 @@ export default function App() {
     const [booting, setBooting] = useState(true);
     const [tab, setTab] = useState<Tab>('sell');
     const [sub, setSub] = useState<Sub>('menu');
+    const [sellCust, setSellCust] = useState(0);
     const [categories, setCategories] = useState<string[]>([]);
     const [products, setProducts] = useState<Product[]>([]);
     const [toast, setToast] = useState<{ msg: string; bad: boolean } | null>(null);
@@ -360,9 +361,9 @@ export default function App() {
 
             <div className="pos-main">
               <div className="screen-in" key={tab + (tab === 'settings' ? sub : '')}>
-                {tab === 'sell' ? <SellScreen products={products} categories={categories} onDone={(inv, items) => { setDone({ inv, items }); }} onNeedRefresh={refreshProducts} notify={notify} /> : null}
+                {tab === 'sell' ? <SellScreen presetCust={sellCust} onPresetUsed={() => setSellCust(0)} products={products} categories={categories} onDone={(inv, items) => { setDone({ inv, items }); }} onNeedRefresh={refreshProducts} notify={notify} /> : null}
                 {tab === 'invoices' ? <InvoicesScreen staff={staff} openInvoice={openInvoice} openQuote={openQuote} notify={notify} /> : null}
-                {tab === 'customers' ? <CustomersScreen staff={staff} openInvoice={openInvoice} notify={notify} /> : null}
+                {tab === 'customers' ? <CustomersScreen staff={staff} openInvoice={openInvoice} notify={notify} startDebtInvoice={(id) => { setSellCust(id); setTab('sell'); setSub('menu'); }} /> : null}
                 {tab === 'stock' ? <StockScreen staff={staff} products={products} categories={categories} refresh={refreshProducts} notify={notify} /> : null}
                 {tab === 'settings' ? (
                     <SettingsArea sub={sub} setSub={setSub} staff={staff} manager={manager} chqAlerts={chqAlerts} notify={notify}
