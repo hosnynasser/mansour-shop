@@ -295,14 +295,6 @@ export default function SellScreen({
                                         </button>
                                         {custId ? <button className="btn btn-ghost btn-sm" style={{ position: 'absolute', left: 56, top: 5, bottom: 5, minHeight: 0, padding: '0 10px' }} onClick={() => { setCustId(0); setPickOpen(false); }}>شيل</button> : null}
                                     </div>
-                                    {!quoteMode ? (<>
-                                    <label>طريقة الدفع</label>
-                                    <div className="pay-toggle">
-                                        <button className={payment === 'cash' ? 'on' : ''} onClick={() => setPayment('cash')}>💵 كاش</button>
-                                        <button className={payment === 'vcash' ? 'on' : ''} onClick={() => setPayment('vcash')}>📱 فودافون كاش</button>
-                                        <button className={payment === 'debt' ? 'on' : ''} onClick={pickDebt}>🧾 آجل</button>
-                                    </div>
-                                    </>) : null}
                                     {payment === 'debt' || pickOpen ? (
                                         <div style={{ marginTop: 10, border: '1.5px dashed var(--amber)', borderRadius: 12, padding: 10 }}>
                                             <label style={{ fontSize: 13, fontWeight: 700, color: 'var(--navy)' }}>{payment === 'debt' ? 'اختار العميل (مطلوب للآجل)' : 'اختار العميل'}</label>
@@ -323,6 +315,14 @@ export default function SellScreen({
                                             </div>
                                         </div>
                                     ) : null}
+                                    {!quoteMode ? (<>
+                                    <label>طريقة الدفع</label>
+                                    <div className="pay-toggle">
+                                        <button className={payment === 'cash' ? 'on' : ''} onClick={() => setPayment('cash')}>💵 كاش</button>
+                                        <button className={payment === 'vcash' ? 'on' : ''} onClick={() => setPayment('vcash')}>📱 فودافون كاش</button>
+                                        <button className={payment === 'debt' ? 'on' : ''} onClick={pickDebt}>🧾 آجل</button>
+                                    </div>
+                                    </>) : null}
                                 </div>
                                 )}
                                 {quoteMode || payment !== 'debt' ? (

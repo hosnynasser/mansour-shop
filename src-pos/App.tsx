@@ -24,6 +24,7 @@ function SettingsArea({ sub, setSub, staff, manager, chqAlerts, notify, categori
         { id: 'reports', icon: 'chart', label: 'التقارير', mgr: true },
         { id: 'staff', icon: 'users', label: 'الحسابات والموظفين' },
         { id: 'cats', icon: 'tag', label: 'تصنيفات الأصناف', mgr: true },
+        { id: 'invset', icon: 'settings', label: 'إعدادات الفواتير', mgr: true },
     ];
     if (sub !== 'menu') {
         const cur = items.find((i) => i.id === sub);
@@ -36,6 +37,7 @@ function SettingsArea({ sub, setSub, staff, manager, chqAlerts, notify, categori
                 {sub === 'reports' && manager ? <ReportsScreen notify={notify} /> : null}
                 {sub === 'staff' ? <AccountsHub me={staff} manager={manager} notify={notify} /> : null}
                 {sub === 'account' ? <AccountScreen staff={staff} notify={notify} /> : null}
+                {sub === 'invset' && manager ? <UiPrefsCard notify={notify} /> : null}
                 {sub === 'cats' && manager ? <CategoriesScreen categories={categories} products={products} refresh={refresh} notify={notify} /> : null}
             </>
         );
@@ -44,7 +46,6 @@ function SettingsArea({ sub, setSub, staff, manager, chqAlerts, notify, categori
         <>
             <h3 className="scr-title"><span className="ico-tile"><Icon n="settings" size={20} /></span>الإعدادات</h3>
             <div style={{ display: 'grid', gap: 8 }}>
-                {manager ? <UiPrefsCard notify={notify} /> : null}
                 {items.filter((i) => !i.mgr || manager).map((i) => (
                     <button key={i.id} className="menu-row" onClick={() => setSub(i.id)}>
                         <span className="ico-tile"><Icon n={i.icon} size={20} /></span>
@@ -162,7 +163,7 @@ function StaffHub({ me, notify }: { me: Staff; notify: (m: string, b?: boolean) 
 }
 
 type Tab = 'sell' | 'invoices' | 'customers' | 'stock' | 'settings';
-type Sub = 'menu' | 'purchases' | 'close' | 'reports' | 'staff' | 'cats' | 'account';
+type Sub = 'menu' | 'invset' | 'purchases' | 'close' | 'reports' | 'staff' | 'cats' | 'account';
 
 export default function App() {
     const [staff, setStaff] = useState<Staff | null>(null);
