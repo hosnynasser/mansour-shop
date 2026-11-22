@@ -156,7 +156,7 @@ function b64ToBytes(b64) {
     return bytes;
 }
 
-async function handle(request, env) {
+async function handle(request, env, ctx) {
     const url = new URL(request.url);
     const path = url.pathname.replace(/\/+$/, '');
 
@@ -276,7 +276,7 @@ async function handle(request, env) {
     // ---- POS (كاشير) ----
     if (path.startsWith('/api/pos/')) {
         if (!env.POS_DB) return json({ error: 'pos_not_ready' }, 503);
-        return handlePos(request, env, path);
+        return handlePos(request, env, path, ctx);
     }
 
     // ---- admin (all routes below require auth) ----
@@ -413,8 +413,8 @@ async function handle(request, env) {
 }
 
 export default {
-    fetch(request, env) {
-        return handle(request, env).catch(() => json({ error: 'server_error' }, 500));
+    fetch(request, env, ctx) {
+        return handle(request, env, ctx).catch(() => json({ error: 'server_error' }, 500));
     },
 };
 
@@ -444,7 +444,7 @@ async function getCategories(env, products) {
     return list;
 }
 
-async function handlePos(request, env, path) {
+async function handlePos(request, env, path, ctx) {
     const staff = await staffAuth(request, env);
     if (!staff) return json({ error: 'unauthorized' }, 401);
     const manager = staff.role === 'manager';
@@ -565,7 +565,7 @@ async function handlePos(request, env, path) {
     if (path === '/api/pos/invoices' && request.method === 'POST') {
         let body;
         try { body = await request.json(); } catch { return json({ error: 'bad_json' }, 400); }
-        const r = await createInvoiceCore(env, staff.user, body);
+        const r = await createInvoiceCore(env, staff.user, body, ctx);
         if (r.error) return json(r, r.status);
         return json(r);
     }
@@ -1323,7 +1323,7 @@ async function handlePos(request, env, path) {
             customerId: body.customerId,
             customerName: quote.customer_name,
             customerPhone: quote.customer_phone,
-        });
+        }, ctx);
         if (r.error) return json(r, r.status);
         await env.POS_DB.prepare("UPDATE quotes SET status = 'converted', invoice_id = ? WHERE id = ? AND status = 'open'").bind(r.id, id).run();
         return json(r);
@@ -1366,7 +1366,24 @@ async function syncStockFlags(env) {
 }
 
 // قلب إنشاء الفاتورة — بيستخدمه البيع العادي وتحويل عرض السعر
-async function createInvoiceCore(env, staffUser, body) {
+// تحديث علامة "نفدت" لأصناف محدّدة بس: بنقرأ الكتالوج والكمية الحالية وقت التنفيذ (مش قيم قديمة)، ونكتب فقط لو فيه علامة لازم تتغيّر
+async function syncOutFlags(env, codes) {
+    try {
+        const kvProds = await getProducts(env);
+        if (!kvProds) return;
+        const { results } = await env.POS_DB.prepare('SELECT code, qty FROM stock WHERE code IN (' + codes.map(() => '?').join(',') + ')').bind(...codes).all();
+        const out = new Set((results || []).filter((r) => (r.qty ?? 0) <= 0).map((r) => r.code));
+        let changed = false;
+        const updated = kvProds.map((p) => {
+            if (!out.has(p.code) || p.stock === false) return p;
+            changed = true;
+            return { ...p, stock: false };
+        });
+        if (changed) await env.SHOP_KV.put('products', JSON.stringify(updated));
+    } catch {}
+}
+
+async function createInvoiceCore(env, staffUser, body, ctx) {
     const items = Array.isArray(body.items) ? body.items.slice(0, 100) : [];
     if (!items.length) return { error: 'empty_invoice', status: 400 };
     // نفس المفتاح = نفس البيع: لو الطلب اتعاد بعد ما نجح (نت ضعيف أو رد ضايع) بنرجّع نفس الفاتورة بدل ما نسجّل تاني
@@ -1382,23 +1399,36 @@ async function createInvoiceCore(env, staffUser, body) {
         const redeemedR = -(pl.results || []).filter((x) => x.kind === 'redeem').reduce((a, x) => a + x.delta, 0);
         return { ok: true, replay: true, id: inv.id, num: inv.num, ts: inv.ts, total: inv.total, discount: inv.discount, pointsEarned: earnedR, pointsRedeemed: redeemedR, pointsBalance: inv.customer_id ? await customerPoints(env, inv.customer_id) : 0 };
     };
-    { const done = await replay(); if (done) return done; }
     const payment = PAYMENTS.includes(body.payment) ? body.payment : 'cash';
-    let customerId = 0;
-    if (payment === 'debt' || body.customerId) {
-        customerId = parseInt(body.customerId, 10) || 0;
-        if (payment === 'debt' && !customerId) return { error: 'customer_required', status: 400 };
-        if (customerId) {
-            const cust = await env.POS_DB.prepare('SELECT id, name, phone FROM customers WHERE id = ?').bind(customerId).first();
-            if (!cust) return { error: 'unknown_customer', status: 400 };
-            body.customerName = body.customerName || cust.name;
-            body.customerPhone = body.customerPhone || cust.phone || '';
-        }
+    const wantCust = payment === 'debt' || body.customerId;
+    const custIdIn = wantCust ? (parseInt(body.customerId, 10) || 0) : 0;
+    if (payment === 'debt' && !custIdIn) {
+        const done = await replay(); if (done) return done;
+        return { error: 'customer_required', status: 400 };
     }
-    const catalog = await getCatalog(env);
+    // موجة قراءات واحدة متوازية: مفتاح التكرار + العميل + الكتالوج + إعدادات النقاط + مخزون وتكلفة أصناف السلة فقط
+    const cartCodes = [...new Set(items.map((it) => clean(it.code, 40)).filter(Boolean))];
+    const stockQ = cartCodes.length
+        ? env.POS_DB.prepare('SELECT code, qty, cost FROM stock WHERE code IN (' + cartCodes.map(() => '?').join(',') + ')').bind(...cartCodes).all()
+        : Promise.resolve({ results: [] });
+    const [done0, cust, catalog, loy, stockR] = await Promise.all([
+        replay(),
+        custIdIn ? env.POS_DB.prepare('SELECT id, name, phone FROM customers WHERE id = ?').bind(custIdIn).first() : Promise.resolve(null),
+        getCatalog(env),
+        loyaltySettings(env),
+        stockQ,
+    ]);
+    if (done0) return done0;
+    let customerId = 0;
+    if (custIdIn) {
+        if (!cust) return { error: 'unknown_customer', status: 400 };
+        customerId = custIdIn;
+        body.customerName = body.customerName || cust.name;
+        body.customerPhone = body.customerPhone || cust.phone || '';
+    }
     const byCode = new Map(catalog.map((p) => [p.code, p]));
-
-    const costMap = new Map(((await env.POS_DB.prepare('SELECT code, cost FROM stock').all()).results || []).map((r) => [r.code, r.cost || 0]));
+    const stockMap = new Map((stockR.results || []).map((r) => [r.code, r]));
+    const costMap = new Map([...stockMap].map(([c, r]) => [c, r.cost || 0]));
     const lines = [];
     for (const it of items) {
         const p = byCode.get(clean(it.code, 40));
@@ -1411,7 +1441,6 @@ async function createInvoiceCore(env, staffUser, body) {
     const subtotal = Math.round(lines.reduce((s, l) => s + l.lineTotal, 0) * 100) / 100;
     let invDisc = Math.max(0, Math.min(subtotal, Number(body.discount) || 0));
     // نقاط الولاء: استبدال نقاط بخصم
-    const loy = await loyaltySettings(env);
     let redeem = Math.max(0, parseInt(body.redeemPoints, 10) || 0);
     if (redeem > 0) {
         if (!loy.enabled) return { error: 'loyalty_off', status: 400 };
@@ -1428,8 +1457,7 @@ async function createInvoiceCore(env, staffUser, body) {
     // فحص مبدئي للمخزون (علشان نرجّع كود الصنف الناقص)، والحماية الفعلية جوه الدفعة الذرّية تحت
     const need = new Map();
     for (const l of lines) need.set(l.code, (need.get(l.code) || 0) + l.qty);
-    const { results: stRows } = await env.POS_DB.prepare('SELECT code, qty FROM stock').all();
-    const have = new Map((stRows || []).map((r) => [r.code, r.qty]));
+    const have = new Map([...stockMap].map(([c, r]) => [c, r.qty]));
     for (const [code, n] of need) {
         if (!have.has(code) || have.get(code) < n) return { error: 'insufficient_stock', code, status: 400 };
     }
@@ -1462,6 +1490,11 @@ async function createInvoiceCore(env, staffUser, body) {
     stmts.push(env.POS_DB.prepare('SELECT id FROM invoices WHERE num = ?').bind(tok));
     if (idemKey) stmts.push(env.POS_DB.prepare("UPDATE settings SET v = CAST(" + invId + " AS TEXT) WHERE k = ?").bind(tok, 'idem:' + idemKey));
     stmts.push(env.POS_DB.prepare("UPDATE invoices SET num = 'INV-' || printf('%06d', id) WHERE num = ?").bind(tok));
+    const needCodes = [...need.keys()];
+    const qtyIdx = stmts.length;
+    stmts.push(env.POS_DB.prepare('SELECT code, qty FROM stock WHERE code IN (' + needCodes.map(() => '?').join(',') + ')').bind(...needCodes));
+    const ptsIdx = customerId ? stmts.length : -1;
+    if (customerId) stmts.push(env.POS_DB.prepare('SELECT COALESCE(SUM(delta), 0) AS p FROM points_log WHERE customer_id = ?').bind(customerId));
     let results;
     try {
         results = await env.POS_DB.batch(stmts);
@@ -1479,8 +1512,13 @@ async function createInvoiceCore(env, staffUser, body) {
     }
     const invoiceId = results[readIdx].results[0].id;
     const num = 'INV-' + String(invoiceId).padStart(6, '0');
-    await syncStockFlags(env);
-    return { ok: true, id: invoiceId, num, ts, total, discount: Math.round(invDisc * 100) / 100, pointsEarned: earned, pointsRedeemed: redeem, pointsBalance: customerId ? await customerPoints(env, customerId) : 0 };
+    // علامة "نفدت" على الموقع: تتحدّث بعد الرد ولو صنف من السلة وصل صفر فعلًا. الكمية الحقيقية والحماية جوه الدفعة، العلامة للعرض بس.
+    const zeroed = (results[qtyIdx].results || []).filter((r) => (r.qty ?? 0) <= 0).map((r) => r.code);
+    if (zeroed.length) {
+        const job = syncOutFlags(env, zeroed);
+        if (ctx && ctx.waitUntil) ctx.waitUntil(job); else await job;
+    }
+    return { ok: true, id: invoiceId, num, ts, total, discount: Math.round(invDisc * 100) / 100, pointsEarned: earned, pointsRedeemed: redeem, pointsBalance: customerId ? (results[ptsIdx].results[0]?.p ?? 0) : 0 };
 }
 
 // ---------- نقاط الولاء + الحضور + المرتبات: دوال مساعدة ----------
