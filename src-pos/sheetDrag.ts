@@ -74,14 +74,33 @@ function dismiss(sheet: HTMLElement) {
     close(sheet);
 }
 
+let force = false;
+// كل طرق القفل (زر قفل، الخلفية، رجوع الموبايل) بتعدّي على نفس الحماية: لو فيه تعديل ما اتحفظش بيظهر الشريط بدل ما القيم تضيع
+document.addEventListener('click', (e) => {
+    if (force) return;
+    const t = e.target as HTMLElement | null;
+    if (!t || !t.closest) return;
+    let sheet: HTMLElement | null = null;
+    const bd = t.closest('.sheet-back') as HTMLElement | null;
+    if (bd) { const n = bd.nextElementSibling as HTMLElement | null; if (n && n.classList.contains('sheet')) sheet = n; }
+    else {
+        const b = t.closest('.sheet-h button') as HTMLElement | null;
+        if (b && /^(قفل|إغلاق|اغلاق)$/.test((b.textContent || '').trim())) sheet = b.closest('.sheet') as HTMLElement | null;
+    }
+    if (sheet && dirty(sheet)) { e.stopImmediatePropagation(); e.preventDefault(); warn(sheet); }
+}, true);
+
 function close(sheet: HTMLElement) {
     sheet.style.transition = 'transform .18s ease-in';
     sheet.style.transform = 'translateY(105%)';
     const back = (sheet.previousElementSibling as HTMLElement | null);
     const target = back && back.classList.contains('sheet-back') ? back : (document.querySelector('.sheet-back:last-of-type') as HTMLElement | null);
     setTimeout(() => {
-        if (target) target.click();
-        else (sheet.querySelector('.sheet-h button') as HTMLElement | null)?.click();
+        force = true;
+        try {
+            if (target) target.click();
+            else (sheet.querySelector('.sheet-h button') as HTMLElement | null)?.click();
+        } finally { force = false; }
         // لو النافذة فضلت (مفيش قفل)، رجّعها
         setTimeout(() => { if (document.body.contains(sheet)) reset(sheet); }, 60);
     }, 170);
