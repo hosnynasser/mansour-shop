@@ -1369,6 +1369,20 @@ async function syncStockFlags(env) {
 async function createInvoiceCore(env, staffUser, body) {
     const items = Array.isArray(body.items) ? body.items.slice(0, 100) : [];
     if (!items.length) return { error: 'empty_invoice', status: 400 };
+    // نفس المفتاح = نفس البيع: لو الطلب اتعاد بعد ما نجح (نت ضعيف أو رد ضايع) بنرجّع نفس الفاتورة بدل ما نسجّل تاني
+    const idemKey = clean(body.key, 64);
+    const replay = async () => {
+        if (!idemKey) return null;
+        const row = await env.POS_DB.prepare("SELECT v FROM settings WHERE k = ?").bind('idem:' + idemKey).first();
+        if (!row) return null;
+        const inv = await env.POS_DB.prepare("SELECT id, num, ts, total, discount, customer_id FROM invoices WHERE id = ?").bind(parseInt(row.v, 10) || 0).first();
+        if (!inv) return null;
+        const pl = await env.POS_DB.prepare("SELECT kind, delta FROM points_log WHERE invoice_id = ?").bind(inv.id).all();
+        const earnedR = (pl.results || []).filter((x) => x.kind === 'earn').reduce((a, x) => a + x.delta, 0);
+        const redeemedR = -(pl.results || []).filter((x) => x.kind === 'redeem').reduce((a, x) => a + x.delta, 0);
+        return { ok: true, replay: true, id: inv.id, num: inv.num, ts: inv.ts, total: inv.total, discount: inv.discount, pointsEarned: earnedR, pointsRedeemed: redeemedR, pointsBalance: inv.customer_id ? await customerPoints(env, inv.customer_id) : 0 };
+    };
+    { const done = await replay(); if (done) return done; }
     const payment = PAYMENTS.includes(body.payment) ? body.payment : 'cash';
     let customerId = 0;
     if (payment === 'debt' || body.customerId) {
@@ -1411,30 +1425,60 @@ async function createInvoiceCore(env, staffUser, body) {
     const total = Math.round((subtotal - invDisc) * 100) / 100;
     const earned = loy.enabled && customerId ? Math.floor(total / loy.earnEvery + 1e-9) : 0;
 
-    // إنقاص المخزون بشكل ذرّي: أي صنف كميته مش كفاية يوقف العملية كلها
-    const stmts = [];
-    for (const l of lines) {
-        stmts.push(env.POS_DB.prepare("UPDATE stock SET qty = qty - ? WHERE code = ? AND qty >= ?").bind(l.qty, l.code, l.qty));
+    // فحص مبدئي للمخزون (علشان نرجّع كود الصنف الناقص)، والحماية الفعلية جوه الدفعة الذرّية تحت
+    const need = new Map();
+    for (const l of lines) need.set(l.code, (need.get(l.code) || 0) + l.qty);
+    const { results: stRows } = await env.POS_DB.prepare('SELECT code, qty FROM stock').all();
+    const have = new Map((stRows || []).map((r) => [r.code, r.qty]));
+    for (const [code, n] of need) {
+        if (!have.has(code) || have.get(code) < n) return { error: 'insufficient_stock', code, status: 400 };
     }
-    stmts.push(env.POS_DB.prepare("INSERT INTO invoices (num, ts, day, staff, payment, subtotal, discount, total, status, customer_name, customer_phone) VALUES ('', '', '', '', '', 0, 0, 0, 'pending', '', '')"));
-    const results = await env.POS_DB.batch(stmts);
-    for (let i = 0; i < lines.length; i++) {
-        if ((results[i].meta?.changes ?? 0) === 0) return { error: 'insufficient_stock', code: lines[i].code, status: 400 };
-    }
-    const invoiceId = results[results.length - 1].meta.last_row_id;
-    const num = 'INV-' + String(invoiceId).padStart(6, '0');
+
+    // دفعة واحدة ذرّية (كل حاجة أو ولا حاجة): إنقاص المخزون + الفاتورة + الأصناف + القيد المالي + النقاط.
+    // لو أي صنف كميته مش كفاية، الإنقاص بيحاول يكتب NULL في عمود qty (NOT NULL) فالدفعة كلها بتتلغي ومفيش مخزون بينقص ولا فاتورة بتتسجل.
+    // مفيش صف فاتورة معلّق بيتسجل خالص.
     const ts = new Date().toISOString();
     const day = cairoDay();
-    const itemStmts = lines.map((l) => env.POS_DB.prepare('INSERT INTO invoice_items (invoice_id, code, name, price, qty, discount, line_total, cost) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').bind(invoiceId, l.code, l.name, l.price, l.qty, l.discount, l.lineTotal, l.cost));
-    itemStmts.push(env.POS_DB.prepare("UPDATE invoices SET num = ?, ts = ?, day = ?, staff = ?, payment = ?, subtotal = ?, discount = ?, total = ?, status = 'completed', customer_name = ?, customer_phone = ?, customer_id = ? WHERE id = ?")
-        .bind(num, ts, day, staffUser, payment, subtotal, Math.round(invDisc * 100) / 100, total, clean(body.customerName, 120), clean(body.customerPhone, 30), customerId || null, invoiceId));
-    if (payment === 'debt') {
-        itemStmts.push(env.POS_DB.prepare("INSERT INTO ledger (customer_id, ts, day, kind, amount, invoice_id, staff, note) VALUES (?, ?, ?, 'charge', ?, ?, ?, '')")
-            .bind(customerId, ts, day, total, invoiceId, staffUser));
+    const tok = 'T-' + crypto.randomUUID();
+    const invId = '(SELECT id FROM invoices WHERE num = ?)';
+    const stmts = [];
+    if (idemKey) stmts.push(env.POS_DB.prepare("INSERT INTO settings (k, v) VALUES (?, '')").bind('idem:' + idemKey));
+    for (const l of lines) {
+        stmts.push(env.POS_DB.prepare("UPDATE stock SET qty = CASE WHEN qty >= ? THEN qty - ? ELSE NULL END WHERE code = ?").bind(l.qty, l.qty, l.code));
     }
-    if (customerId && redeem > 0) itemStmts.push(env.POS_DB.prepare("INSERT INTO points_log (customer_id, ts, day, delta, kind, invoice_id, note) VALUES (?, ?, ?, ?, 'redeem', ?, ?)").bind(customerId, ts, day, -redeem, invoiceId, 'استبدال نقاط في ' + num));
-    if (customerId && earned > 0) itemStmts.push(env.POS_DB.prepare("INSERT INTO points_log (customer_id, ts, day, delta, kind, invoice_id, note) VALUES (?, ?, ?, ?, 'earn', ?, ?)").bind(customerId, ts, day, earned, invoiceId, 'مكتسبة من ' + num));
-    await env.POS_DB.batch(itemStmts);
+    stmts.push(env.POS_DB.prepare("INSERT INTO invoices (num, ts, day, staff, payment, subtotal, discount, total, status, customer_name, customer_phone, customer_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?, ?, ?)")
+        .bind(tok, ts, day, staffUser, payment, subtotal, Math.round(invDisc * 100) / 100, total, clean(body.customerName, 120), clean(body.customerPhone, 30), customerId || null));
+    for (const l of lines) {
+        stmts.push(env.POS_DB.prepare('INSERT INTO invoice_items (invoice_id, code, name, price, qty, discount, line_total, cost) VALUES (' + invId + ', ?, ?, ?, ?, ?, ?, ?)')
+            .bind(tok, l.code, l.name, l.price, l.qty, l.discount, l.lineTotal, l.cost));
+    }
+    if (payment === 'debt') {
+        stmts.push(env.POS_DB.prepare("INSERT INTO ledger (customer_id, ts, day, kind, amount, invoice_id, staff, note) VALUES (?, ?, ?, 'charge', ?, " + invId + ", ?, '')")
+            .bind(customerId, ts, day, total, tok, staffUser));
+    }
+    if (customerId && redeem > 0) stmts.push(env.POS_DB.prepare("INSERT INTO points_log (customer_id, ts, day, delta, kind, invoice_id, note) VALUES (?, ?, ?, ?, 'redeem', " + invId + ", 'استبدال نقاط في INV-' || printf('%06d', " + invId + "))").bind(customerId, ts, day, -redeem, tok, tok));
+    if (customerId && earned > 0) stmts.push(env.POS_DB.prepare("INSERT INTO points_log (customer_id, ts, day, delta, kind, invoice_id, note) VALUES (?, ?, ?, ?, 'earn', " + invId + ", 'مكتسبة من INV-' || printf('%06d', " + invId + "))").bind(customerId, ts, day, earned, tok, tok));
+    const readIdx = stmts.length;
+    stmts.push(env.POS_DB.prepare('SELECT id FROM invoices WHERE num = ?').bind(tok));
+    if (idemKey) stmts.push(env.POS_DB.prepare("UPDATE settings SET v = CAST(" + invId + " AS TEXT) WHERE k = ?").bind(tok, 'idem:' + idemKey));
+    stmts.push(env.POS_DB.prepare("UPDATE invoices SET num = 'INV-' || printf('%06d', id) WHERE num = ?").bind(tok));
+    let results;
+    try {
+        results = await env.POS_DB.batch(stmts);
+    } catch (e) {
+        const msg = String(e?.message || e);
+        const done = await replay();
+        if (done) return done; // نفس المفتاح اتسجل في نفس اللحظة
+        if (/NOT NULL/i.test(msg) && /qty/i.test(msg)) {
+            // حد تاني خد الكمية في نفس اللحظة: مفيش حاجة اتسجلت، بنرجّع الصنف الناقص
+            const { results: r2 } = await env.POS_DB.prepare('SELECT code, qty FROM stock').all();
+            const h2 = new Map((r2 || []).map((r) => [r.code, r.qty]));
+            for (const [code, n] of need) if ((h2.get(code) ?? 0) < n) return { error: 'insufficient_stock', code, status: 400 };
+        }
+        throw e;
+    }
+    const invoiceId = results[readIdx].results[0].id;
+    const num = 'INV-' + String(invoiceId).padStart(6, '0');
     await syncStockFlags(env);
     return { ok: true, id: invoiceId, num, ts, total, discount: Math.round(invDisc * 100) / 100, pointsEarned: earned, pointsRedeemed: redeem, pointsBalance: customerId ? await customerPoints(env, customerId) : 0 };
 }

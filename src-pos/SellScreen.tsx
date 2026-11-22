@@ -142,16 +142,22 @@ export default function SellScreen({
         setBusy(false);
     };
 
+    const saleKey = useRef<{ sig: string; key: string } | null>(null);
     const submit = async () => {
         if (!cart.length || busy) return;
         if (payment === 'debt' && !custId) { notify('اختار العميل اللي هيسجل عليه الآجل', true); return; }
         setBusy(true);
         try {
-            const r = await api('/api/pos/invoices', 'POST', {
+            const payload = {
                 items: cart.map((l) => ({ code: l.code, qty: l.qty, discount: l.discount })),
                 payment, discount: disc0, customerName: custName.trim(), customerPhone: custPhone.trim(),
                 customerId: custId || undefined, redeemPoints: redeemPts || undefined,
-            });
+            };
+            // نفس السلة = نفس المفتاح: لو الطلب اتعاد بعد رد ضايع، الخادم يرجّع نفس الفاتورة بدل ما يسجّل بيع تاني
+            const sig = JSON.stringify(payload);
+            if (!saleKey.current || saleKey.current.sig !== sig) saleKey.current = { sig, key: (crypto as any).randomUUID ? crypto.randomUUID() : Date.now() + '-' + Math.random().toString(36).slice(2) };
+            const r = await api('/api/pos/invoices', 'POST', { ...payload, key: saleKey.current.key });
+            saleKey.current = null;
             const inv: Invoice = {
                 id: r.id, num: r.num, ts: r.ts, staff: '', payment,
                 subtotal: Math.round(subtotal * 100) / 100, discount: r.discount ?? Math.round(disc * 100) / 100, total: r.total,
