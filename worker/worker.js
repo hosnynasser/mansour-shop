@@ -21,7 +21,7 @@
 
 const CORS = {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
+    'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type,X-Admin-Code',
 };
 
@@ -545,6 +545,12 @@ async function handlePos(request, env, path) {
         const qty = Math.max(0, Math.min(1000000, parseInt(body.qty, 10) || 0));
         const minQty = body.minQty !== undefined ? Math.max(0, Math.min(100000, parseInt(body.minQty, 10) || 0)) : null;
         if (!code) return json({ error: 'bad_fields' }, 400);
+        if (body.qty === undefined && minQty !== null) {
+            // تعديل حد النواقص بس من غير ما نلمس الكمية
+            await env.POS_DB.prepare('INSERT INTO stock (code, qty, min_qty) VALUES (?, 0, ?) ON CONFLICT(code) DO UPDATE SET min_qty = excluded.min_qty').bind(code, minQty).run();
+            await syncStockFlags(env);
+            return json({ ok: true, code, min_qty: minQty });
+        }
         if (minQty !== null) {
             await env.POS_DB.prepare('INSERT INTO stock (code, qty, min_qty) VALUES (?, ?, ?) ON CONFLICT(code) DO UPDATE SET qty = excluded.qty, min_qty = excluded.min_qty').bind(code, qty, minQty).run();
         } else {
@@ -626,7 +632,7 @@ async function handlePos(request, env, path) {
 
     // ---- العملاء والمديونيات ----
     if (path === '/api/pos/customers' && request.method === 'GET') {
-        const { results } = await env.POS_DB.prepare("SELECT c.id, c.name, c.phone, c.notes, COALESCE((SELECT SUM(CASE WHEN l.kind = 'charge' THEN l.amount ELSE -l.amount END) FROM ledger l WHERE l.customer_id = c.id), 0) AS balance, COALESCE((SELECT SUM(delta) FROM points_log pl WHERE pl.customer_id = c.id), 0) AS points FROM customers c ORDER BY c.name").all();
+        const { results } = await env.POS_DB.prepare("SELECT c.id, c.name, c.phone, c.notes, c.grp, COALESCE((SELECT SUM(CASE WHEN l.kind = 'charge' THEN l.amount ELSE -l.amount END) FROM ledger l WHERE l.customer_id = c.id), 0) AS balance, COALESCE((SELECT SUM(delta) FROM points_log pl WHERE pl.customer_id = c.id), 0) AS points FROM customers c ORDER BY c.name").all();
         return json({ customers: results || [] });
     }
 
@@ -635,8 +641,8 @@ async function handlePos(request, env, path) {
         try { body = await request.json(); } catch { return json({ error: 'bad_json' }, 400); }
         const name = clean(body.name, 120);
         if (name.length < 2) return json({ error: 'bad_fields' }, 400);
-        const r = await env.POS_DB.prepare('INSERT INTO customers (name, phone, notes, created_at) VALUES (?, ?, ?, ?)')
-            .bind(name, clean(body.phone, 30), clean(body.notes, 500), new Date().toISOString()).run();
+        const r = await env.POS_DB.prepare('INSERT INTO customers (name, phone, notes, grp, created_at) VALUES (?, ?, ?, ?, ?)')
+            .bind(name, clean(body.phone, 30), clean(body.notes, 500), clean(body.grp, 40) || null, new Date().toISOString()).run();
         return json({ ok: true, id: r.meta.last_row_id });
     }
 
@@ -648,8 +654,13 @@ async function handlePos(request, env, path) {
         try { body = await request.json(); } catch { return json({ error: 'bad_json' }, 400); }
         const name = clean(body.name, 120);
         if (!id || name.length < 2) return json({ error: 'bad_fields' }, 400);
-        await env.POS_DB.prepare('UPDATE customers SET name = ?, phone = ?, notes = ? WHERE id = ?')
-            .bind(name, clean(body.phone, 30), clean(body.notes, 500), id).run();
+        if (body.grp === undefined) {
+            await env.POS_DB.prepare('UPDATE customers SET name = ?, phone = ?, notes = ? WHERE id = ?')
+                .bind(name, clean(body.phone, 30), clean(body.notes, 500), id).run();
+        } else {
+            await env.POS_DB.prepare('UPDATE customers SET name = ?, phone = ?, notes = ?, grp = ? WHERE id = ?')
+                .bind(name, clean(body.phone, 30), clean(body.notes, 500), clean(body.grp, 40) || null, id).run();
+        }
         return json({ ok: true });
     }
 
@@ -666,7 +677,7 @@ async function handlePos(request, env, path) {
     // كارت عميل: بياناته + كشف حساب + فواتيره
     if (path.startsWith('/api/pos/customer/') && request.method === 'GET' && !path.endsWith('/payment')) {
         const id = parseInt(path.slice('/api/pos/customer/'.length), 10) || 0;
-        const customer = await env.POS_DB.prepare('SELECT id, name, phone, notes FROM customers WHERE id = ?').bind(id).first();
+        const customer = await env.POS_DB.prepare('SELECT id, name, phone, notes, grp FROM customers WHERE id = ?').bind(id).first();
         if (!customer) return json({ error: 'not_found' }, 404);
         const { results: ledger } = await env.POS_DB.prepare('SELECT id, ts, kind, amount, invoice_id, staff, note FROM ledger WHERE customer_id = ? ORDER BY id DESC LIMIT 100').bind(id).all();
         const bal = await env.POS_DB.prepare("SELECT COALESCE(SUM(CASE WHEN kind = 'charge' THEN amount ELSE -amount END), 0) AS b FROM ledger WHERE customer_id = ?").bind(id).first();
@@ -749,7 +760,7 @@ async function handlePos(request, env, path) {
 
     // ---- الموردين (مدير فقط) ----
     if (path === '/api/pos/suppliers' && request.method === 'GET') {
-        const { results } = await env.POS_DB.prepare('SELECT id, name, phone, notes, balance FROM suppliers ORDER BY name LIMIT 500').all();
+        const { results } = await env.POS_DB.prepare('SELECT id, name, phone, notes, grp, balance FROM suppliers ORDER BY name LIMIT 500').all();
         return json({ suppliers: results || [] });
     }
     if (path === '/api/pos/suppliers' && request.method === 'POST') {
@@ -758,7 +769,7 @@ async function handlePos(request, env, path) {
         try { body = await request.json(); } catch { return json({ error: 'bad_json' }, 400); }
         const name = clean(body.name, 120);
         if (name.length < 2) return json({ error: 'bad_name' }, 400);
-        const r = await env.POS_DB.prepare('INSERT INTO suppliers (name, phone, notes, balance) VALUES (?, ?, ?, 0)').bind(name, clean(body.phone, 30), clean(body.notes, 400)).run();
+        const r = await env.POS_DB.prepare('INSERT INTO suppliers (name, phone, notes, grp, balance) VALUES (?, ?, ?, ?, 0)').bind(name, clean(body.phone, 30), clean(body.notes, 400), clean(body.grp, 40) || null).run();
         return json({ ok: true, id: r.meta.last_row_id });
     }
     if (path.startsWith('/api/pos/supplier/') && request.method === 'GET' && !path.endsWith('/payment')) {
@@ -775,7 +786,11 @@ async function handlePos(request, env, path) {
         try { body = await request.json(); } catch { return json({ error: 'bad_json' }, 400); }
         const name = clean(body.name, 120);
         if (name.length < 2) return json({ error: 'bad_name' }, 400);
-        await env.POS_DB.prepare('UPDATE suppliers SET name = ?, phone = ?, notes = ? WHERE id = ?').bind(name, clean(body.phone, 30), clean(body.notes, 400), id).run();
+        if (body.grp === undefined) {
+            await env.POS_DB.prepare('UPDATE suppliers SET name = ?, phone = ?, notes = ? WHERE id = ?').bind(name, clean(body.phone, 30), clean(body.notes, 400), id).run();
+        } else {
+            await env.POS_DB.prepare('UPDATE suppliers SET name = ?, phone = ?, notes = ?, grp = ? WHERE id = ?').bind(name, clean(body.phone, 30), clean(body.notes, 400), clean(body.grp, 40) || null, id).run();
+        }
         return json({ ok: true });
     }
     if (path.startsWith('/api/pos/supplier/') && request.method === 'DELETE') {

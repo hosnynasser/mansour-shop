@@ -163,3 +163,7 @@ CREATE TABLE IF NOT EXISTS owner_cred (id INTEGER PRIMARY KEY, user TEXT NOT NUL
 -- idempotency key for manual debt/payment retries
 ALTER TABLE ledger ADD COLUMN idem TEXT;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_ledger_idem ON ledger(idem) WHERE idem IS NOT NULL;
+
+-- customer groups named by the owner
+ALTER TABLE customers ADD COLUMN grp TEXT;
+ALTER TABLE suppliers ADD COLUMN grp TEXT;

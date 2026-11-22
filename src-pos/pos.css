@@ -288,3 +288,6 @@ html.dd-lock,html.dd-lock body,html.dd-lock #root,html.dd-lock .pos-main{overflo
 .inv-row,.stock-row,.prod-card,.cat-dd-btn{touch-action:manipulation;cursor:pointer}
 .inv-row{min-height:60px}
 .sheet-h{touch-action:none}.sheet{overscroll-behavior:contain}
+
+.fab-add{position:fixed;bottom:76px;inset-inline-end:16px;z-index:25;background:linear-gradient(120deg,var(--blue),var(--blue-d));color:#fff;border:0;border-radius:999px;padding:13px 20px;display:flex;align-items:center;gap:8px;font-size:16px;font-weight:800;box-shadow:0 8px 22px rgba(31,100,160,.4)}
+.fab-add:active{transform:scale(.97)}

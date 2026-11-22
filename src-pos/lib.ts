@@ -14,7 +14,7 @@ export interface Invoice {
     pointsEarned?: number; pointsBalance?: number;
 }
 export interface InvoiceItem { code: string; name: string; price: number; qty: number; discount: number; line_total: number; }
-export interface Customer { id: number; name: string; phone: string; notes: string; balance?: number; points?: number; }
+export interface Customer { id: number; name: string; phone: string; notes: string; grp?: string | null; balance?: number; points?: number; }
 export interface LedgerEntry { id: number; ts: string; kind: 'charge' | 'payment'; amount: number; invoice_id: number | null; staff: string; note: string; }
 export interface Report {
     from: string; to: string;
@@ -69,7 +69,7 @@ export function fmtTime(ts: string): string {
 
 export const paymentLabel = (p: string) => (p === 'vcash' ? 'فودافون كاش' : p === 'debt' ? 'آجل' : p === 'quote' ? 'عرض سعر' : 'كاش');
 
-export interface Supplier { id: number; name: string; phone: string; notes: string; balance: number; }
+export interface Supplier { id: number; name: string; phone: string; notes: string; grp?: string | null; balance: number; }
 export interface Purchase { id: number; num: string; ts: string; staff: string; supplier_id: number; supplier_name: string; total: number; paid: number; status: string; note: string; }
 export interface PurchaseItem { code: string; name: string; qty: number; cost: number; }
 export interface Expense { id: number; ts: string; day: string; title: string; amount: number; cat: string; staff: string; note: string; }

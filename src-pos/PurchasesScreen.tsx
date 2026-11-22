@@ -125,14 +125,15 @@ export default function PurchasesScreen({ products, refresh, notify, onChequesCh
     );
 }
 
-function NewSupplierSheet({ onClose, onDone, notify }: { onClose: () => void; onDone: () => void; notify: (m: string, b?: boolean) => void }) {
+export function NewSupplierSheet({ onClose, onDone, notify, groups }: { groups?: string[]; onClose: () => void; onDone: () => void; notify: (m: string, b?: boolean) => void }) {
     const [name, setName] = useState('');
     const [phone, setPhone] = useState('');
+    const [grp, setGrp] = useState('');
     const [busy, setBusy] = useState(false);
     const save = async () => {
         if (name.trim().length < 2 || busy) return;
         setBusy(true);
-        try { await api('/api/pos/suppliers', 'POST', { name: name.trim(), phone: phone.trim() }); onDone(); }
+        try { await api('/api/pos/suppliers', 'POST', { name: name.trim(), phone: phone.trim(), grp: grp.trim() }); onDone(); }
         catch { notify('مشكلة في الحفظ', true); setBusy(false); }
     };
     return (
@@ -143,6 +144,8 @@ function NewSupplierSheet({ onClose, onDone, notify }: { onClose: () => void; on
                 <div className="sheet-b">
                     <div className="field"><label>اسم المورد</label><input value={name} onChange={(e) => setName(e.target.value)} placeholder="شركة النور للكهرباء" /></div>
                     <div className="field"><label>تليفون (اختياري)</label><input inputMode="tel" dir="ltr" style={{ textAlign: 'end' }} value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="01xxxxxxxxx" /></div>
+                    <div className="field"><label>المجموعة (اختياري)</label><input list="sgrp-list" maxLength={40} value={grp} onChange={(e) => setGrp(e.target.value)} placeholder="اكتب اسم مجموعة أو اختار" /></div>
+                    <datalist id="sgrp-list">{(groups || []).map((g) => <option key={g} value={g} />)}</datalist>
                     <button className="btn btn-amber btn-block" disabled={busy || name.trim().length < 2} onClick={save}>{busy ? '…' : 'حفظ المورد'}</button>
                 </div>
             </div>
@@ -150,10 +153,17 @@ function NewSupplierSheet({ onClose, onDone, notify }: { onClose: () => void; on
     );
 }
 
-function SupplierSheet({ data, onClose, onChanged, notify }: { data: { s: Supplier; purchases: Purchase[] }; onClose: () => void; onChanged: () => void; notify: (m: string, b?: boolean) => void }) {
+export function SupplierSheet({ data, onClose, onChanged, notify, groups }: { groups?: string[]; data: { s: Supplier; purchases: Purchase[] }; onClose: () => void; onChanged: () => void; notify: (m: string, b?: boolean) => void }) {
     const { s, purchases } = data;
     const [amount, setAmount] = useState('');
     const [busy, setBusy] = useState(false);
+    const [g, setG] = useState(s.grp || '');
+    const [gBusy, setGBusy] = useState(false);
+    const saveGrp = async () => {
+        setGBusy(true);
+        try { await api('/api/pos/supplier/' + s.id, 'PATCH', { name: s.name, phone: s.phone || '', notes: s.notes || '', grp: g.trim() }); notify('اتحفظت المجموعة ✓'); onChanged(); }
+        catch { notify('مشكلة في حفظ المجموعة', true); setGBusy(false); }
+    };
     const pay = async () => {
         const a = Number(amount) || 0;
         if (a <= 0 || busy) return;
@@ -178,6 +188,11 @@ function SupplierSheet({ data, onClose, onChanged, notify }: { data: { s: Suppli
                             <button className="btn btn-navy btn-sm" disabled={busy} onClick={pay}>{busy ? '…' : 'تسديد'}</button>
                         </div>
                     ) : null}
+                    <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
+                        <input list="sgrp-list2" maxLength={40} placeholder="المجموعة (اختياري)" value={g} onChange={(e) => setG(e.target.value)} style={{ flex: 1, border: '1.5px solid var(--line)', borderRadius: 10, padding: '9px 12px', fontSize: 16 }} />
+                        <datalist id="sgrp-list2">{(groups || []).map((x) => <option key={x} value={x} />)}</datalist>
+                        {g.trim() !== (s.grp || '') ? <button className="btn btn-navy btn-sm" disabled={gBusy} onClick={saveGrp}>{gBusy ? '…' : 'حفظ'}</button> : null}
+                    </div>
                     <h4 style={{ margin: '14px 0 6px' }}>فواتير الشراء منه</h4>
                     {purchases.length === 0 ? <div style={{ fontSize: 13, color: 'var(--muted)' }}>مفيش فواتير منه لسه</div> : purchases.filter((p) => p.status !== 'voided').map((p) => (
                         <div className="close-line" key={p.id}><span>{p.num} · {fmtTime(p.ts)}</span><b>{fmt(p.total)} ج</b></div>

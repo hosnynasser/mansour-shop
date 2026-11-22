@@ -6,6 +6,7 @@ import CatChips from './CatChips';
 import ScannerModal from './ScannerModal';
 import { ExportCard, ProfitView } from './ReportsExtra';
 import { Loyalty } from './LoyaltyUI';
+import { NewSupplierSheet, SupplierSheet } from './PurchasesScreen';
 
 // تحميل تدريجي: بيعرض أول 40 وبيزود لما المستخدم ينزل
 function MoreSentinel({ shown, total, more }: { shown: number; total: number; more: () => void }) {
@@ -18,6 +19,9 @@ function MoreSentinel({ shown, total, more }: { shown: number; total: number; mo
     return shown < total ? <div ref={ref} className="empty" style={{ padding: 12 }}>…</div> : null;
 }
 const PAGE_N = 40;
+// بحث ذكي: بيتجاهل التشكيل والهمزات والتاء المربوطة والياء، والمسافات، وكل كلمة لازم تتطابق
+const norm = (t: string) => (t || '').toLowerCase().replace(/[\u064B-\u0652\u0640]/g, '').replace(/[أإآٱ]/g, 'ا').replace(/ة/g, 'ه').replace(/[ىئ]/g, 'ي').replace(/ؤ/g, 'و').replace(/\s+/g, ' ').trim();
+const smartMatch = (hay: string, q: string) => { const t = norm(q); if (!t) return true; const h = norm(hay); return t.split(' ').every((w) => h.includes(w)); };
 
 // ---------- فواتير ----------
 export function InvoicesScreen({ staff, openInvoice, openQuote, notify }: { staff: Staff; openInvoice: (id: number) => void; openQuote: (id: number) => void; notify: (m: string, b?: boolean) => void }) {
@@ -105,6 +109,64 @@ export function InvoicesScreen({ staff, openInvoice, openQuote, notify }: { staf
     );
 }
 
+// ---------- تبويب الموردين (نفس بيانات المشتريات الحالية، عرض بس) ----------
+function SuppliersPane({ notify }: { notify: (m: string, b?: boolean) => void }) {
+    const [list, setList] = useState<any[] | null>(null);
+    const [q, setQ] = useState('');
+    const [grpSel, setGrpSel] = useState('');
+    const [newOpen, setNewOpen] = useState(false);
+    const [det, setDet] = useState<any>(null);
+    const load = async () => { try { const r = await api('/api/pos/suppliers'); setList(r.suppliers || []); } catch { notify('مشكلة في تحميل الموردين', true); setList([]); } };
+    useEffect(() => { load(); }, []);
+    const open = async (id: number) => { try { const r = await api('/api/pos/supplier/' + id); setDet({ s: r.supplier, purchases: r.purchases || [] }); } catch { notify('مشكلة في فتح المورد', true); } };
+    const all = list || [];
+    const groups = useMemo(() => Array.from(new Set(all.map((x) => (x.grp || '').trim()).filter(Boolean))).sort() as string[], [list]);
+    useEffect(() => { if (grpSel && grpSel !== '__none' && !groups.includes(grpSel)) setGrpSel(''); }, [groups, grpSel]);
+    const rows = all.filter((x) => (!grpSel || (grpSel === '__none' ? !(x.grp || '').trim() : (x.grp || '').trim() === grpSel)) && smartMatch(x.name + ' ' + (x.phone || '') + ' ' + (x.grp || ''), q));
+    // اتجاه الحساب: رصيد المورد الموجب = مستحق له علينا (عليا). الرصيد السالب (لو حصل) = ليا عنده
+    const owed = all.reduce((a, x) => a + Math.max(0, x.balance || 0), 0);
+    const mine = all.reduce((a, x) => a + Math.max(0, -(x.balance || 0)), 0);
+    const net = mine - owed;
+    const Cell = ({ l, v, c }: { l: string; v: string; c?: string }) => (
+        <div style={{ flex: 1, textAlign: 'center', padding: '6px 4px', minWidth: 0 }}>
+            <div style={{ fontSize: 11, color: 'var(--muted)' }}>{l}</div>
+            <div style={{ fontSize: 16, fontWeight: 800, color: c || 'var(--navy)' }}>{v}</div>
+        </div>
+    );
+    return (
+        <>
+            <div className="close-card" style={{ display: 'flex', padding: '2px 4px', marginBottom: 8 }}>
+                <Cell l="ليا (عند الموردين)" v={fmt(mine) + ' ج'} c="var(--ok)" />
+                <Cell l="عليا (للموردين)" v={fmt(owed) + ' ج'} c="var(--danger)" />
+                <Cell l={net >= 0 ? 'الصافي (ليا)' : 'الصافي (عليا)'} v={fmt(Math.abs(net)) + ' ج'} />
+            </div>
+            <div className="search-wrap" style={{ top: 0 }}>
+                <div className="search-box" style={{ padding: '7px 12px' }}>
+                    <span className="si"><Icon n="search" size={18} /></span>
+                    <input placeholder="ابحث بالاسم أو التليفون أو المجموعة…" value={q} onChange={(e) => setQ(e.target.value)} style={{ fontSize: 16 }} />
+                </div>
+                {groups.length > 0 ? (
+                    <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingTop: 6, WebkitOverflowScrolling: 'touch' }}>
+                        {[['', 'الكل'], ...groups.map((g) => [g, g]), ['__none', 'بدون مجموعة']].map(([v, l]) => (
+                            <button key={v || 'all'} className={'btn btn-sm ' + (grpSel === v ? 'btn-navy' : 'btn-ghost')} style={{ flex: '0 0 auto', padding: '4px 12px', minHeight: 32 }} onClick={() => setGrpSel(v)}>{l}</button>
+                        ))}
+                    </div>
+                ) : null}
+            </div>
+            {list === null ? <div className="empty">جاري التحميل…</div> : rows.length === 0 ? <div className="empty">{all.length === 0 ? 'مفيش موردين لسه' : 'مفيش نتايج للبحث'}</div> : rows.map((x) => (
+                <button key={x.id} className="inv-row" style={{ width: '100%', textAlign: 'start', padding: '8px 12px', marginBottom: 6 }} onClick={() => open(x.id)}>
+                    <div><div className="n">{x.name}</div><div className="m">{x.phone || 'بدون تليفون'}{x.grp ? ' · ' + x.grp : ''}</div></div>
+                    <span style={{ marginInlineStart: 'auto' }}>{x.balance > 0 ? <span className="badge vcash" style={{ fontSize: 13 }}>له {fmt(x.balance)} ج</span> : <span className="badge cash">صفر</span>}</span>
+                </button>
+            ))}
+            <div style={{ height: 70 }} />
+            <button className="fab-add" onClick={() => setNewOpen(true)}><Icon n="plus" size={20} /> إضافة مورد</button>
+            {newOpen ? <NewSupplierSheet groups={groups} onClose={() => setNewOpen(false)} onDone={() => { setNewOpen(false); load(); notify('اتضاف المورد ✓'); }} notify={notify} /> : null}
+            {det ? <SupplierSheet groups={groups} data={det} onClose={() => setDet(null)} onChanged={() => { setDet(null); load(); }} notify={notify} /> : null}
+        </>
+    );
+}
+
 // ---------- المخزون ----------
 export function StockScreen({ staff, products, categories, refresh, notify }: { staff: Staff; products: Product[]; categories: string[]; refresh: () => void; notify: (m: string, b?: boolean) => void }) {
     const manager = staff.role === 'manager';
@@ -161,20 +223,33 @@ export function StockScreen({ staff, products, categories, refresh, notify }: { 
     };
 
     const [minEdit, setMinEdit] = useState<Record<string, string>>({});
+    const [stOpen, setStOpen] = useState(false);
+    const [stQ, setStQ] = useState('');
+    const [setShownN, setSetShownN] = useState(60);
+    const [minBusy, setMinBusy] = useState('');
+    const saveMin = async (code: string) => {
+        const mv = minEdit[code];
+        if (mv === undefined) return;
+        setMinBusy(code);
+        try {
+            await api('/api/pos/stock', 'POST', { code, minQty: parseInt(mv, 10) || 0 });
+            setMinEdit((e) => { const n = { ...e }; delete n[code]; return n; });
+            refresh();
+            notify('اتحفظ حد النواقص ✓');
+        } catch (e: any) { notify(e?.data?.error === 'forbidden' ? 'الصلاحية دي للمدير بس' : 'مشكلة في الحفظ', true); }
+        setMinBusy('');
+    };
     const save = async (code: string) => {
         const v = edit[code];
-        const mv = minEdit[code];
-        if (v === undefined && mv === undefined) return;
+        if (v === undefined) return;
         const p0 = products.find((p) => p.code === code);
         setBusy(code);
         try {
             await api('/api/pos/stock', 'POST', {
                 code,
                 qty: v !== undefined ? (parseInt(v, 10) || 0) : (p0?.qty ?? 0),
-                minQty: mv !== undefined ? (parseInt(mv, 10) || 0) : undefined,
             });
             setEdit((e) => { const n = { ...e }; delete n[code]; return n; });
-            setMinEdit((e) => { const n = { ...e }; delete n[code]; return n; });
             refresh();
             notify('تم الحفظ ✓');
         } catch (e: any) {
@@ -186,8 +261,9 @@ export function StockScreen({ staff, products, categories, refresh, notify }: { 
 
     return (
         <>
-            <div className="search-wrap">
-                <div className="search-box">
+            <div className="search-wrap" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                {manager ? <button className="btn btn-ghost btn-sm" style={{ minHeight: 46, flex: '0 0 auto', display: 'flex', alignItems: 'center', gap: 6 }} onClick={() => setStOpen(true)} title="إعدادات المخزون"><Icon n="settings" size={20} /> الإعدادات</button> : null}
+                <div className="search-box" style={{ flex: 1 }}>
                     <span className="si"><Icon n="search" size={20} /></span>
                     <input placeholder="ابحث بالاسم أو الكود…" value={q} onChange={(e) => setQ(e.target.value)} />
                 </div>
@@ -223,14 +299,7 @@ export function StockScreen({ staff, products, categories, refresh, notify }: { 
                                 value={edit[p.code] !== undefined ? edit[p.code] : String(p.qty)}
                                 onChange={(e) => setEdit((x) => ({ ...x, [p.code]: e.target.value }))}
                             />
-                            <input
-                                inputMode="numeric"
-                                title="حد النواقص — نبهني لو الرصيد وصل له"
-                                style={{ width: 44, borderColor: p.qty <= ((p as any).min_qty ?? 5) ? 'var(--danger)' : undefined }}
-                                value={minEdit[p.code] !== undefined ? minEdit[p.code] : String((p as any).min_qty ?? 5)}
-                                onChange={(e) => setMinEdit((x) => ({ ...x, [p.code]: e.target.value }))}
-                            />
-                            {((edit[p.code] !== undefined && edit[p.code] !== String(p.qty)) || (minEdit[p.code] !== undefined && minEdit[p.code] !== String((p as any).min_qty ?? 5))) ? (
+                            {(edit[p.code] !== undefined && edit[p.code] !== String(p.qty)) ? (
                                 <button className="btn btn-blue btn-sm" disabled={busy === p.code} onClick={() => save(p.code)}>{busy === p.code ? '…' : 'حفظ'}</button>
                             ) : null}
                         </>
@@ -240,6 +309,34 @@ export function StockScreen({ staff, products, categories, refresh, notify }: { 
                 </div>
             ))}
             <MoreSentinel shown={shown} total={filtered.length} more={() => setShown((n) => n + PAGE_N)} />
+            {stOpen ? (
+                <>
+                    <div className="sheet-back" onClick={() => setStOpen(false)} />
+                    <div className="sheet">
+                        <div className="sheet-h"><h3>إعدادات المخزون</h3><button className="btn btn-ghost btn-sm" style={{ marginInlineStart: 'auto' }} onClick={() => setStOpen(false)}>قفل</button></div>
+                        <div className="sheet-b">
+                            <h4 style={{ margin: '0 0 4px' }}>حد النواقص</h4>
+                            <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 8 }}>لو رصيد الصنف وصل للرقم ده أو أقل، بيدخل في النواقص. القيم الحالية زي ما هي، وبتتغير هنا بس.</div>
+                            <div className="search-box" style={{ padding: '7px 12px', marginBottom: 8 }}>
+                                <span className="si"><Icon n="search" size={18} /></span>
+                                <input placeholder="ابحث عن صنف…" value={stQ} onChange={(e) => { setStQ(e.target.value); setSetShownN(60); }} style={{ fontSize: 16 }} />
+                            </div>
+                            {products.filter((p) => smartMatch(p.name + ' ' + p.code, stQ)).slice(0, setShownN).map((p) => {
+                                const cur = String((p as any).min_qty ?? 5);
+                                const dirty = minEdit[p.code] !== undefined && minEdit[p.code] !== cur;
+                                return (
+                                    <div className="stock-row" key={p.code}>
+                                        <div className="sn"><PN t={p.name} /><span>{p.code} · الرصيد {p.qty}</span></div>
+                                        <input inputMode="numeric" title="حد النواقص" style={{ width: 56 }} value={minEdit[p.code] !== undefined ? minEdit[p.code] : cur} onChange={(e) => setMinEdit((x) => ({ ...x, [p.code]: e.target.value }))} />
+                                        {dirty ? <button className="btn btn-blue btn-sm" disabled={minBusy === p.code} onClick={() => saveMin(p.code)}>{minBusy === p.code ? '…' : 'حفظ'}</button> : null}
+                                    </div>
+                                );
+                            })}
+                            {products.filter((p) => smartMatch(p.name + ' ' + p.code, stQ)).length > setShownN ? <button className="btn btn-ghost btn-block" onClick={() => setSetShownN((n) => n + 60)}>عرض المزيد</button> : null}
+                        </div>
+                    </div>
+                </>
+            ) : null}
             {form ? (
                 <>
                     <div className="sheet-back" onClick={() => setForm(null)} />
@@ -487,6 +584,9 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
     const [payAmt, setPayAmt] = useState('');
     const [payMethod, setPayMethod] = useState<'cash' | 'vcash'>('cash');
     const [editMode, setEditMode] = useState(false);
+    const [mode, setMode] = useState<'cust' | 'sup'>('cust');
+    const [grpSel, setGrpSel] = useState('');
+    const [grp, setGrp] = useState('');
 
     const [shown, setShown] = useState(PAGE_N);
     const load = async () => {
@@ -522,8 +622,8 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
         if (name.trim().length < 2) { notify('اكتب اسم العميل', true); return; }
         setBusy(true);
         try {
-            const r = await api('/api/pos/customers', 'POST', { name: name.trim(), phone: phone.trim() });
-            setName(''); setPhone(''); setAddOpen(false);
+            const r = await api('/api/pos/customers', 'POST', { name: name.trim(), phone: phone.trim(), grp: grp.trim() });
+            setName(''); setPhone(''); setGrp(''); setAddOpen(false);
             notify('اتضاف العميل ✓'); load();
             openDetail(r.id);
         } catch { notify('مشكلة في الإضافة', true); }
@@ -549,7 +649,7 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
         if (!detail) return;
         setBusy(true);
         try {
-            await api('/api/pos/customers?id=' + detail.customer.id, 'PATCH', { name: detail.customer.name, phone: detail.customer.phone, notes: detail.customer.notes });
+            await api('/api/pos/customers?id=' + detail.customer.id, 'PATCH', { name: detail.customer.name, phone: detail.customer.phone, notes: detail.customer.notes, grp: (detail.customer.grp || '').trim() });
             notify('اتحفظ ✓'); setEditMode(false); load();
         } catch { notify('مشكلة في الحفظ', true); }
         setBusy(false);
@@ -586,28 +686,51 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
     const dq = useDeferredValue(q);
     const s = dq.trim().toLowerCase();
     useEffect(() => { setShown(PAGE_N); }, [s]);
-    const filtered = useMemo(() => (s ? list.filter((c) => c.name.toLowerCase().includes(s) || (c.phone || '').includes(s)) : list), [list, s]);
+    const groups = useMemo(() => Array.from(new Set(list.map((c) => (c.grp || '').trim()).filter(Boolean))).sort(), [list]);
+    useEffect(() => { if (grpSel && grpSel !== '__none' && !groups.includes(grpSel)) setGrpSel(''); }, [groups, grpSel]);
+    const filtered = useMemo(() => list.filter((c) => (!grpSel || (grpSel === '__none' ? !(c.grp || '').trim() : (c.grp || '').trim() === grpSel)) && smartMatch(c.name + ' ' + (c.phone || '') + ' ' + (c.grp || ''), dq)), [list, dq, grpSel]);
+    // ليا = اللي العملاء عليهم (أرصدة موجبة بس) | عليا = رصيد العملاء الدايرين (له) | الصافي = ليا - عليا
     const totalDebt = useMemo(() => list.reduce((a, c) => a + Math.max(0, c.balance || 0), 0), [list]);
+    const totalCredit = useMemo(() => list.reduce((a, c) => a + Math.max(0, -(c.balance || 0)), 0), [list]);
+
+    const Sum = ({ l, v, c }: { l: string; v: string; c?: string }) => (
+        <div style={{ flex: 1, textAlign: 'center', padding: '6px 4px', minWidth: 0 }}>
+            <div style={{ fontSize: 11, color: 'var(--muted)' }}>{l}</div>
+            <div style={{ fontSize: 16, fontWeight: 800, color: c || 'var(--navy)' }}>{v}</div>
+        </div>
+    );
+    const net = totalDebt - totalCredit;
 
     return (
         <>
-            <div className="search-wrap">
-                <div className="search-box">
-                    <span className="si"><Icon n="search" size={20} /></span>
-                    <input placeholder="ابحث بالاسم أو التليفون…" value={q} onChange={(e) => setQ(e.target.value)} />
-                </div>
+            <div className="pay-toggle" style={{ marginBottom: 8 }}>
+                <button className={mode === 'cust' ? 'on' : ''} onClick={() => setMode('cust')} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '8px 4px' }}><Icon n="users" size={18} /> العملاء</button>
+                {manager ? <button className={mode === 'sup' ? 'on' : ''} onClick={() => setMode('sup')} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '8px 4px' }}><Icon n="truck" size={18} /> الموردين</button> : null}
             </div>
-            {totalDebt > 0 ? (
-                <div className="close-card grand" style={{ marginBottom: 12 }}>
-                    <div className="close-line"><span>إجمالي المديونيات القائمة</span><b>{fmt(totalDebt)} ج</b></div>
+            {mode === 'sup' && manager ? <SuppliersPane notify={notify} /> : (<>
+            <div className="close-card" style={{ display: 'flex', padding: '2px 4px', marginBottom: 8 }}>
+                <Sum l="ليا (على العملاء)" v={fmt(totalDebt) + ' ج'} c="var(--danger)" />
+                <Sum l="عليا (رصيد للعملاء)" v={fmt(totalCredit) + ' ج'} c="var(--ok)" />
+                <Sum l={net >= 0 ? 'الصافي (ليا)' : 'الصافي (عليا)'} v={fmt(Math.abs(net)) + ' ج'} />
+            </div>
+            <div className="search-wrap" style={{ top: 0 }}>
+                <div className="search-box" style={{ padding: '7px 12px' }}>
+                    <span className="si"><Icon n="search" size={18} /></span>
+                    <input placeholder="ابحث بالاسم أو التليفون أو المجموعة…" value={q} onChange={(e) => setQ(e.target.value)} style={{ fontSize: 16 }} />
                 </div>
-            ) : null}
-            <button className="btn btn-navy btn-block" style={{ marginBottom: 12 }} onClick={() => setAddOpen(true)}><Icon n="plus" size={18} /> إضافة عميل</button>
+                {groups.length > 0 ? (
+                    <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingTop: 6, WebkitOverflowScrolling: 'touch' }}>
+                        {[['', 'الكل'], ...groups.map((g) => [g, g]), ['__none', 'بدون مجموعة']].map(([v, l]) => (
+                            <button key={v || 'all'} className={'btn btn-sm ' + (grpSel === v ? 'btn-navy' : 'btn-ghost')} style={{ flex: '0 0 auto', padding: '4px 12px', minHeight: 32 }} onClick={() => setGrpSel(v)}>{l}</button>
+                        ))}
+                    </div>
+                ) : null}
+            </div>
             {loading ? <div className="empty">جاري التحميل…</div> : filtered.length === 0 ? <div className="empty">{list.length === 0 ? 'مفيش عملاء لسه — ضيف أول عميل' : 'مفيش نتايج للبحث'}</div> : filtered.slice(0, shown).map((c) => (
-                <button key={c.id} className="inv-row" style={{ width: '100%', textAlign: 'start' }} onPointerDown={() => prefetch(c.id)} onClick={() => openDetail(c.id)}>
+                <button key={c.id} className="inv-row" style={{ width: '100%', textAlign: 'start', padding: '8px 12px', marginBottom: 6 }} onPointerDown={() => prefetch(c.id)} onClick={() => openDetail(c.id)}>
                     <div>
                         <div className="n">{c.name}</div>
-                        <div className="m">{c.phone || 'بدون تليفون'}</div>
+                        <div className="m">{c.phone || 'بدون تليفون'}{c.grp ? ' · ' + c.grp : ''}</div>
                     </div>
                     <span style={{ marginInlineStart: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
                         {(c.balance || 0) > 0 ? <span className="badge vcash" style={{ fontSize: 13 }}>عليه {fmt(c.balance!)} ج</span> : (c.balance || 0) < 0 ? <span className="badge cash" style={{ fontSize: 13 }}>له {fmt(-(c.balance as number))} ج</span> : <span className="badge cash">صفر</span>}
@@ -615,6 +738,9 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
                 </button>
             ))}
             <MoreSentinel shown={shown} total={filtered.length} more={() => setShown((n) => n + PAGE_N)} />
+            <div style={{ height: 70 }} />
+            <button className="fab-add" onClick={() => setAddOpen(true)}><Icon n="plus" size={20} /> إضافة عميل</button>
+            </>)}
 
             {addOpen ? (
                 <>
@@ -624,6 +750,8 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
                         <div className="sheet-b">
                             <div className="field"><label>اسم العميل</label><input value={name} onChange={(e) => setName(e.target.value)} /></div>
                             <div className="field"><label>تليفون (اختياري)</label><input inputMode="tel" dir="ltr" style={{ textAlign: 'end' }} value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="01xxxxxxxxx" /></div>
+                            <div className="field"><label>المجموعة (اختياري)</label><input list="grp-list" maxLength={40} value={grp} onChange={(e) => setGrp(e.target.value)} placeholder="اكتب اسم مجموعة أو اختار" /></div>
+                            <datalist id="grp-list">{groups.map((g) => <option key={g} value={g} />)}</datalist>
                             <button className="btn btn-amber btn-block" disabled={busy} onClick={add}>{busy ? '…' : 'حفظ'}</button>
                         </div>
                     </div>
@@ -650,6 +778,8 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
                                     <div className="field"><label>الاسم</label><input value={detail.customer.name} onChange={(e) => setDetail({ ...detail, customer: { ...detail.customer, name: e.target.value } })} /></div>
                                     <div className="field"><label>تليفون</label><input dir="ltr" style={{ textAlign: 'end' }} value={detail.customer.phone} onChange={(e) => setDetail({ ...detail, customer: { ...detail.customer, phone: e.target.value } })} /></div>
                                     <div className="field"><label>ملاحظات</label><input value={detail.customer.notes} onChange={(e) => setDetail({ ...detail, customer: { ...detail.customer, notes: e.target.value } })} /></div>
+                                    <div className="field"><label>المجموعة</label><input list="grp-list" maxLength={40} value={detail.customer.grp || ''} onChange={(e) => setDetail({ ...detail, customer: { ...detail.customer, grp: e.target.value } })} placeholder="من غير مجموعة" /></div>
+                                    <datalist id="grp-list">{groups.map((g) => <option key={g} value={g} />)}</datalist>
                                     <div style={{ display: 'flex', gap: 8 }}>
                                         <button className="btn btn-blue btn-sm" disabled={busy} onClick={saveEdit}>حفظ</button>
                                         <button className="btn btn-ghost btn-sm" onClick={() => setEditMode(false)}>إلغاء</button>
