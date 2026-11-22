@@ -48,7 +48,7 @@ export default function SellScreen({
     }, [q, products, catSel, categories]);
 
     // تحميل تدريجي: دفعة صغيرة الأول، والباقي بيتحمّل لما المستخدم يسكرول
-    const BATCH = 30;
+    const BATCH = 120;
     const [shown, setShown] = useState(BATCH);
     const sentinel = useRef<HTMLDivElement>(null);
     useEffect(() => { setShown(BATCH); }, [q, catSel]);

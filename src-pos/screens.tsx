@@ -19,6 +19,7 @@ function MoreSentinel({ shown, total, more }: { shown: number; total: number; mo
     return shown < total ? <div ref={ref} className="empty" style={{ padding: 12 }}>…</div> : null;
 }
 const PAGE_N = 40;
+const STOCK_N = 200;
 // بحث ذكي: بيتجاهل التشكيل والهمزات والتاء المربوطة والياء، والمسافات، وكل كلمة لازم تتطابق
 const norm = (t: string) => (t || '').toLowerCase().replace(/[\u064B-\u0652\u0640]/g, '').replace(/[أإآٱ]/g, 'ا').replace(/ة/g, 'ه').replace(/[ىئ]/g, 'ي').replace(/ؤ/g, 'و').replace(/\s+/g, ' ').trim();
 const smartMatch = (hay: string, q: string) => { const t = norm(q); if (!t) return true; const h = norm(hay); return t.split(' ').every((w) => h.includes(w)); };
@@ -188,9 +189,9 @@ export function StockScreen({ staff, products, categories, refresh, notify }: { 
     const dq = useDeferredValue(q);
     const s = dq.trim().toLowerCase();
     const [catSel, setCatSel] = useState('');
-    const [shown, setShown] = useState(PAGE_N);
+    const [shown, setShown] = useState(STOCK_N);
     const [lowOnly, setLowOnly] = useState(false);
-    useEffect(() => { setShown(PAGE_N); }, [s, catSel, lowOnly]);
+    useEffect(() => { setShown(STOCK_N); }, [s, catSel, lowOnly]);
     const idx = useMemo(() => products.map((p) => (p.name + ' ' + p.code).toLowerCase()), [products]);
     const [form, setForm] = useState<{ mode: 'add' | 'edit'; name: string; code: string; price: string; cost: string; qty: string; cat: string } | null>(null);
     const [fBusy, setFBusy] = useState(false);
@@ -310,7 +311,7 @@ export function StockScreen({ staff, products, categories, refresh, notify }: { 
                     )}
                 </div>
             ))}
-            <MoreSentinel shown={shown} total={filtered.length} more={() => setShown((n) => n + PAGE_N)} />
+            <MoreSentinel shown={shown} total={filtered.length} more={() => setShown((n) => n + STOCK_N)} />
             {stOpen ? (
                 <>
                     <div className="sheet-back" onClick={() => setStOpen(false)} />
@@ -591,10 +592,11 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
     const [grpSel, setGrpSel] = useState('');
     const [grp, setGrp] = useState('');
 
-    const [shown, setShown] = useState(PAGE_N);
+    const [shown, setShown] = useState(1e6);
+    const [cfresh, setCfresh] = useState(false);
     const load = async () => {
         const c = cget<Customer[]>('customers'); if (c && !list.length) { setList(c); setLoading(false); } else if (!c) setLoading(true);
-        try { const r = await api('/api/pos/customers'); setList(r.customers || []); cset('customers', r.customers || []); } catch { notify('مشكلة في تحميل العملاء', true); }
+        try { const r = await api('/api/pos/customers'); setList(r.customers || []); cset('customers', r.customers || []); setCfresh(true); } catch { notify('مشكلة في تحميل العملاء، الأرقام المعروضة قديمة', true); }
         setLoading(false);
     };
     useEffect(() => { load(); }, []);
@@ -688,7 +690,6 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
 
     const dq = useDeferredValue(q);
     const s = dq.trim().toLowerCase();
-    useEffect(() => { setShown(PAGE_N); }, [s]);
     const groups = useMemo(() => Array.from(new Set(list.map((c) => (c.grp || '').trim()).filter(Boolean))).sort(), [list]);
     useEffect(() => { if (grpSel && grpSel !== '__none' && !groups.includes(grpSel)) setGrpSel(''); }, [groups, grpSel]);
     const filtered = useMemo(() => list.filter((c) => (!grpSel || (grpSel === '__none' ? !(c.grp || '').trim() : (c.grp || '').trim() === grpSel)) && smartMatch(c.name + ' ' + (c.phone || '') + ' ' + (c.grp || ''), dq)), [list, dq, grpSel]);
@@ -716,6 +717,7 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
                 <Sum l="عليا (رصيد للعملاء)" v={fmt(totalCredit) + ' ج'} c="var(--ok)" />
                 <Sum l={net >= 0 ? 'الصافي (ليا)' : 'الصافي (عليا)'} v={fmt(Math.abs(net)) + ' ج'} />
             </div>
+            {!cfresh && !loading ? <div style={{ fontSize: 12, color: 'var(--muted)', textAlign: 'center', margin: '-2px 0 6px' }}>بيتحدّث… الأرقام دي من آخر مرة</div> : null}
             <div className="search-wrap" style={{ top: 0 }}>
                 <div className="search-box" style={{ padding: '7px 12px' }}>
                     <span className="si"><Icon n="search" size={18} /></span>

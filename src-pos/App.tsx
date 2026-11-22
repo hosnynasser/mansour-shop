@@ -223,6 +223,7 @@ export default function App() {
         } catch {}
     }, [notify]);
     useEffect(() => { if (staff && staff.role === 'manager') refreshChequeAlerts(true); }, [staff?.user, staff?.role]);
+    useEffect(() => { if (staff) api('/api/pos/customers').then((r) => cset('customers', r.customers || [])).catch(() => {}); }, [staff?.user]);
     useEffect(() => { if (staff && staff.role === 'manager') api('/api/pos/suppliers').then((r) => cset('suppliers', r.suppliers || [])).catch(() => {}); }, [staff?.user, staff?.role]);
 
     useEffect(() => {
