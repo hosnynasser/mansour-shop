@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import PN from './Bidi';
 import { createPortal } from 'react-dom';
-import { api, buildWaText, clearCred, cred, fmt, fmtTime, paymentLabel, quoteAsInvoice, saveCred, cget, cset, Customer, Invoice, InvoiceItem, Product, Quote, Staff } from './lib';
+import { api, buildWaText, clearCred, cred, fmt, fmtTime, paymentLabel, quoteAsInvoice, saveCred, cget, cset, csetIf, clearCache, Customer, Invoice, InvoiceItem, Product, Quote, Staff } from './lib';
 import SellScreen from './SellScreen';
 import { CloseScreen, CustomersScreen, InvoicesScreen, ReportsScreen, StaffScreen, StockScreen } from './screens';
 import PurchasesScreen from './PurchasesScreen';
@@ -223,8 +223,8 @@ export default function App() {
         } catch {}
     }, [notify]);
     useEffect(() => { if (staff && staff.role === 'manager') refreshChequeAlerts(true); }, [staff?.user, staff?.role]);
-    useEffect(() => { if (staff) api('/api/pos/customers').then((r) => cset('customers', r.customers || [])).catch(() => {}); }, [staff?.user]);
-    useEffect(() => { if (staff && staff.role === 'manager') api('/api/pos/suppliers').then((r) => cset('suppliers', r.suppliers || [])).catch(() => {}); }, [staff?.user, staff?.role]);
+    useEffect(() => { if (staff) { const c0 = cred(); api('/api/pos/customers').then((r) => csetIf('customers', r.customers || [], c0)).catch(() => {}); } }, [staff?.user]);
+    useEffect(() => { if (staff && staff.role === 'manager') { const c0 = cred(); api('/api/pos/suppliers').then((r) => csetIf('suppliers', r.suppliers || [], c0)).catch(() => {}); } else if (staff) { try { localStorage.removeItem('pc_suppliers'); } catch {} } }, [staff?.user, staff?.role]);
 
     useEffect(() => {
         (async () => {
@@ -546,6 +546,7 @@ function Login({ onLogin }: { onLogin: (s: Staff) => void }) {
     const submit = async () => {
         if (!user.trim() || !pass) return;
         setBusy(true); setErr('');
+        clearCache();
         saveCred(user.trim() + ':' + pass);
         try {
             const me = await api('/api/pos/me');

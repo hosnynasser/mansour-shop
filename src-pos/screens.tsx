@@ -1,6 +1,6 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import PN from './Bidi';
-import { api, cget, cset, cairoToday, fmt, fmtTime, paymentLabel, Customer, Expense, Invoice, LedgerEntry, Product, Quote, Report, Role, Staff } from './lib';
+import { api, cget, cset, csetIf, cred, cairoToday, fmt, fmtTime, paymentLabel, Customer, Expense, Invoice, LedgerEntry, Product, Quote, Report, Role, Staff } from './lib';
 import Icon from './Icon';
 import CatChips from './CatChips';
 import ScannerModal from './ScannerModal';
@@ -113,12 +113,12 @@ export function InvoicesScreen({ staff, openInvoice, openQuote, notify }: { staf
 // ---------- تبويب الموردين (نفس بيانات المشتريات الحالية، عرض بس) ----------
 function SuppliersPane({ notify }: { notify: (m: string, b?: boolean) => void }) {
     const [list, setList] = useState<any[] | null>(() => cget<any[]>('suppliers'));
-    const [fresh, setFresh] = useState(false);
+    const [fst, setFst] = useState<'loading' | 'ok' | 'err'>('loading');
     const [q, setQ] = useState('');
     const [grpSel, setGrpSel] = useState('');
     const [newOpen, setNewOpen] = useState(false);
     const [det, setDet] = useState<any>(null);
-    const load = async () => { try { const r = await api('/api/pos/suppliers'); setList(r.suppliers || []); cset('suppliers', r.suppliers || []); setFresh(true); } catch { notify('مشكلة في تحميل الموردين، الأرقام المعروضة قديمة', true); setList((l) => l || []); } };
+    const load = async () => { const c0 = cred(); setFst('loading'); try { const r = await api('/api/pos/suppliers'); setList(r.suppliers || []); csetIf('suppliers', r.suppliers || [], c0); setFst('ok'); } catch { setFst('err'); notify('مشكلة في تحميل الموردين، الأرقام المعروضة قديمة', true); } };
     useEffect(() => { load(); }, []);
     const open = async (id: number) => { try { const r = await api('/api/pos/supplier/' + id); setDet({ s: r.supplier, purchases: r.purchases || [] }); } catch { notify('مشكلة في فتح المورد', true); } };
     const all = list || [];
@@ -142,7 +142,7 @@ function SuppliersPane({ notify }: { notify: (m: string, b?: boolean) => void })
                 <Cell l="عليا (للموردين)" v={fmt(owed) + ' ج'} c="var(--danger)" />
                 <Cell l={net >= 0 ? 'الصافي (ليا)' : 'الصافي (عليا)'} v={fmt(Math.abs(net)) + ' ج'} />
             </div>
-            {!fresh ? <div style={{ fontSize: 12, color: 'var(--muted)', textAlign: 'center', margin: '-2px 0 6px' }}>بيتحدّث… الأرقام دي من آخر مرة</div> : null}
+            {fst === 'loading' ? <div style={{ fontSize: 12, color: 'var(--muted)', textAlign: 'center', margin: '-2px 0 6px' }}>بيتحدّث… الأرقام دي من آخر مرة</div> : fst === 'err' ? <div style={{ fontSize: 12, color: 'var(--danger)', textAlign: 'center', margin: '-2px 0 6px' }}>فشل التحديث، الأرقام دي من آخر مرة ومش محدّثة</div> : null}
             <div className="search-wrap" style={{ top: 0 }}>
                 <div className="search-box" style={{ padding: '7px 12px' }}>
                     <span className="si"><Icon n="search" size={18} /></span>
@@ -156,7 +156,7 @@ function SuppliersPane({ notify }: { notify: (m: string, b?: boolean) => void })
                     </div>
                 ) : null}
             </div>
-            {list === null ? <div className="empty">جاري التحميل…</div> : rows.length === 0 ? <div className="empty">{all.length === 0 ? 'مفيش موردين لسه' : 'مفيش نتايج للبحث'}</div> : rows.map((x) => (
+            {list === null ? <div className="empty">{fst === 'err' ? 'مشكلة في تحميل الموردين، جرب تاني' : 'جاري التحميل…'}</div> : rows.length === 0 ? <div className="empty">{all.length === 0 ? 'مفيش موردين لسه' : 'مفيش نتايج للبحث'}</div> : rows.map((x) => (
                 <button key={x.id} className="inv-row" style={{ width: '100%', textAlign: 'start', padding: '8px 12px', marginBottom: 6 }} onClick={() => open(x.id)}>
                     <div><div className="n">{x.name}</div><div className="m">{x.phone || 'بدون تليفون'}{x.grp ? ' · ' + x.grp : ''}</div></div>
                     <span style={{ marginInlineStart: 'auto' }}>{x.balance > 0 ? <span className="badge vcash" style={{ fontSize: 13 }}>له {fmt(x.balance)} ج</span> : <span className="badge cash">صفر</span>}</span>
@@ -593,10 +593,11 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
     const [grp, setGrp] = useState('');
 
     const [shown, setShown] = useState(1e6);
-    const [cfresh, setCfresh] = useState(false);
+    const [cst, setCst] = useState<'loading' | 'ok' | 'err'>('loading');
     const load = async () => {
+        const c0 = cred(); setCst('loading');
         const c = cget<Customer[]>('customers'); if (c && !list.length) { setList(c); setLoading(false); } else if (!c) setLoading(true);
-        try { const r = await api('/api/pos/customers'); setList(r.customers || []); cset('customers', r.customers || []); setCfresh(true); } catch { notify('مشكلة في تحميل العملاء، الأرقام المعروضة قديمة', true); }
+        try { const r = await api('/api/pos/customers'); setList(r.customers || []); csetIf('customers', r.customers || [], c0); setCst('ok'); } catch { setCst('err'); notify('مشكلة في تحميل العملاء، الأرقام المعروضة قديمة', true); }
         setLoading(false);
     };
     useEffect(() => { load(); }, []);
@@ -717,7 +718,7 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
                 <Sum l="عليا (رصيد للعملاء)" v={fmt(totalCredit) + ' ج'} c="var(--ok)" />
                 <Sum l={net >= 0 ? 'الصافي (ليا)' : 'الصافي (عليا)'} v={fmt(Math.abs(net)) + ' ج'} />
             </div>
-            {!cfresh && !loading ? <div style={{ fontSize: 12, color: 'var(--muted)', textAlign: 'center', margin: '-2px 0 6px' }}>بيتحدّث… الأرقام دي من آخر مرة</div> : null}
+            {cst === 'loading' && !loading ? <div style={{ fontSize: 12, color: 'var(--muted)', textAlign: 'center', margin: '-2px 0 6px' }}>بيتحدّث… الأرقام دي من آخر مرة</div> : cst === 'err' ? <div style={{ fontSize: 12, color: 'var(--danger)', textAlign: 'center', margin: '-2px 0 6px' }}>فشل التحديث، الأرقام دي من آخر مرة ومش محدّثة</div> : null}
             <div className="search-wrap" style={{ top: 0 }}>
                 <div className="search-box" style={{ padding: '7px 12px' }}>
                     <span className="si"><Icon n="search" size={18} /></span>

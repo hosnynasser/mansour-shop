@@ -38,6 +38,12 @@ export function cget<T>(k: string): T | null {
 export function cset(k: string, v: unknown) {
     try { localStorage.setItem('pc_' + k, JSON.stringify(v)); } catch {}
 }
+export function csetIf(k: string, v: unknown, c: string) {
+    if (cred() === c) cset(k, v);
+}
+export function clearCache() {
+    try { Object.keys(localStorage).filter((x) => x.startsWith('pc_')).forEach((x) => localStorage.removeItem(x)); } catch {}
+}
 export function clearCred() {
     try { localStorage.removeItem('pos_cred'); Object.keys(localStorage).filter((x) => x.startsWith('pc_')).forEach((x) => localStorage.removeItem(x)); } catch {}
 }
