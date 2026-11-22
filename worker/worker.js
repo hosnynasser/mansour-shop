@@ -565,9 +565,10 @@ async function handlePos(request, env, path, ctx) {
     if (path === '/api/pos/invoices' && request.method === 'POST') {
         let body;
         try { body = await request.json(); } catch { return json({ error: 'bad_json' }, 400); }
+        const t0 = Date.now();
         const r = await createInvoiceCore(env, staff.user, body, ctx);
         if (r.error) return json(r, r.status);
-        return json(r);
+        return json({ ...r, srvMs: Date.now() - t0 });
     }
 
     // قائمة الفواتير (الكاشير يشوف فواتيره بس، المدير يشوف الكل)

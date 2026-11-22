@@ -1,19 +1,22 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import PN from './Bidi';
 import { api, fmt, CartLine, Customer, Invoice, Product } from './lib';
+import { getOp, recordTiming, retrySale, startSale, subscribeOp } from './saleOp';
 import ScannerModal from './ScannerModal';
 import Icon from './Icon';
 import CatChips from './CatChips';
 import { Loyalty } from './LoyaltyUI';
 
 export default function SellScreen({
-    products, categories, onDone, onNeedRefresh, notify, presetCust, onPresetUsed,
+    products, categories, onDone, onNeedRefresh, notify, presetCust, onPresetUsed, quoteMode, onQuoteExit,
 }: {
+    quoteMode?: boolean;
+    onQuoteExit?: (saved: boolean) => void;
     presetCust?: number;
     onPresetUsed?: () => void;
     products: Product[];
     categories: string[];
-    onDone: (inv: Invoice, items: { code: string; name: string; price: number; qty: number; discount: number; line_total: number }[]) => void;
+    onDone: (inv: Invoice, items: { code: string; name: string; price: number; qty: number; discount: number; line_total: number }[], timing?: string) => void;
     onNeedRefresh: () => void;
     notify: (msg: string, bad?: boolean) => void;
 }) {
@@ -31,6 +34,8 @@ export default function SellScreen({
     const [custName, setCustName] = useState('');
     const [custPhone, setCustPhone] = useState('');
     const [busy, setBusy] = useState(false);
+    const [discOpen, setDiscOpen] = useState(false);
+    const [waOpen, setWaOpen] = useState(false);
     const [loy, setLoy] = useState<Loyalty | null>(null);
     const [ptsPick, setPtsPick] = useState(false);
     const [redeem, setRedeem] = useState('');
@@ -64,16 +69,17 @@ export default function SellScreen({
     }, [hasMore, shown, filtered]);
 
     const addLine = (p: Product) => {
+        if (getOp()) return;
         setCart((c) => {
             const i = c.findIndex((l) => l.code === p.code);
             if (i >= 0) { const n = [...c]; n[i] = { ...n[i], qty: n[i].qty + 1 }; return n; }
             return [...c, { code: p.code, name: p.name, price: p.price, qty: 1, discount: 0 }];
         });
     };
-    const setQty = (code: string, d: number) =>
+    const setQty = (code: string, d: number) => getOp() ? undefined :
         setCart((c) => c.map((l) => (l.code === code ? { ...l, qty: Math.max(1, l.qty + d) } : l)));
-    const removeLine = (code: string) => setCart((c) => c.filter((l) => l.code !== code));
-    const setLineDisc = (code: string, v: string) =>
+    const removeLine = (code: string) => getOp() ? undefined : setCart((c) => c.filter((l) => l.code !== code));
+    const setLineDisc = (code: string, v: string) => getOp() ? undefined :
         setCart((c) => c.map((l) => (l.code === code ? { ...l, discount: Math.max(0, Number(v) || 0) } : l)));
 
     const subtotal = cart.reduce((s, l) => s + Math.max(0, l.price * l.qty - l.discount), 0);
@@ -89,6 +95,7 @@ export default function SellScreen({
 
     const count = cart.reduce((s, l) => s + l.qty, 0);
 
+    useEffect(() => { if (quoteMode) { setPayment('cash'); setCustId(0); setPickOpen(false); } }, [quoteMode]);
     const togglePick = async () => {
         setPickOpen((v) => !v);
         if (customers === null) { try { const r = await api('/api/pos/customers'); setCustomers(r.customers || []); } catch { notify('مشكلة في تحميل العملاء', true); setCustomers([]); } }
@@ -138,59 +145,89 @@ export default function SellScreen({
         try {
             const r = await api('/api/pos/quotes', 'POST', {
                 items: cart.map((l) => ({ code: l.code, qty: l.qty, discount: l.discount })),
-                discount: disc, customerName: custName.trim(), customerPhone: custPhone.trim(),
+                discount: disc0, customerName: custName.trim(), customerPhone: custPhone.trim(),
             });
             setCart([]); setCartOpen(false); setInvDisc(''); setCustName(''); setCustPhone(''); setCustId(0); setCustQ('');
-            notify('اتحفظ عرض السعر ' + r.num + ' ✓ — تلاقيه في شاشة الفواتير');
+            notify('اتحفظ عرض السعر ' + r.num + ' ✓');
+            onQuoteExit?.(true);
         } catch { notify('مشكلة في حفظ العرض، جرب تاني', true); }
         setBusy(false);
     };
 
-    const saleKey = useRef<{ sig: string; key: string } | null>(null);
-    const submit = async () => {
-        if (!cart.length || busy) return;
+    const [, force] = useState(0);
+    useEffect(() => subscribeOp(() => force((n) => n + 1)), []);
+    const pend = getOp();
+    useEffect(() => { if (!pend) return; const t = setInterval(() => force((n) => n + 1), 1000); return () => clearInterval(t); }, [!!pend]);
+    const slow = pend && pend.state === 'sending' && Date.now() - pend.startedAt > 5000;
+
+    const submit = () => {
+        if (!cart.length || busy || getOp()) return;
         if (payment === 'debt' && !custId) { notify('اختار العميل اللي هيسجل عليه الآجل', true); return; }
-        setBusy(true);
-        try {
-            const payload = {
-                items: cart.map((l) => ({ code: l.code, qty: l.qty, discount: l.discount })),
-                payment, discount: disc0, customerName: custName.trim(), customerPhone: custPhone.trim(),
-                customerId: custId || undefined, redeemPoints: redeemPts || undefined,
-            };
-            // نفس السلة = نفس المفتاح: لو الطلب اتعاد بعد رد ضايع، الخادم يرجّع نفس الفاتورة بدل ما يسجّل بيع تاني
-            const sig = JSON.stringify(payload);
-            if (!saleKey.current || saleKey.current.sig !== sig) saleKey.current = { sig, key: (crypto as any).randomUUID ? crypto.randomUUID() : Date.now() + '-' + Math.random().toString(36).slice(2) };
-            const r = await api('/api/pos/invoices', 'POST', { ...payload, key: saleKey.current.key });
-            saleKey.current = null;
+        const payload = {
+            items: cart.map((l) => ({ code: l.code, qty: l.qty, discount: l.discount })),
+            payment, discount: disc0, customerName: custName.trim(), customerPhone: custPhone.trim(),
+            customerId: custId || undefined, redeemPoints: redeemPts || undefined,
+        };
+        // لقطة وقت التسجيل: الفاتورة اللي هتظهر مبنية على اللي اتبعت فعلًا حتى لو الرد اتأخر أو الشاشة اتقفلت
+        const snap = { payment, subtotal, disc, custName: custName.trim(), custPhone: custPhone.trim(), selName: selCust?.name || '', selPhone: selCust?.phone || '', cart: cart.map((l) => ({ ...l })) };
+        startSale(payload, total, cart.length, (r, totalMs) => {
             const inv: Invoice = {
-                id: r.id, num: r.num, ts: r.ts, staff: '', payment,
-                subtotal: Math.round(subtotal * 100) / 100, discount: r.discount ?? Math.round(disc * 100) / 100, total: r.total,
-                status: 'completed', customer_name: custName.trim() || selCust?.name || '', customer_phone: custPhone.trim() || selCust?.phone || '',
+                id: r.id, num: r.num, ts: r.ts, staff: '', payment: snap.payment,
+                subtotal: Math.round(snap.subtotal * 100) / 100, discount: r.discount ?? Math.round(snap.disc * 100) / 100, total: r.total,
+                status: 'completed', customer_name: snap.custName || snap.selName, customer_phone: snap.custPhone || snap.selPhone,
                 pointsEarned: r.pointsEarned, pointsBalance: r.pointsBalance,
             };
-            const items = cart.map((l) => ({
+            const items = snap.cart.map((l) => ({
                 code: l.code, name: l.name, price: l.price, qty: l.qty,
                 discount: Math.round(l.discount * 100) / 100, line_total: Math.max(0, l.price * l.qty - l.discount),
             }));
+            recordTiming({ total: totalMs, srv: typeof r.srvMs === 'number' ? r.srvMs : undefined, attempts: 0, replay: !!r.replay, items: snap.cart.length });
+            const sec = (n: number) => (n / 1000).toFixed(1);
+            const timing = '⏱ ' + sec(totalMs) + ' ث' + (typeof r.srvMs === 'number' ? ' (الخادم ' + sec(r.srvMs) + ' ث)' : '') + (r.replay ? ' · نفس الفاتورة اتسجلت قبل كده' : '');
             setCart([]); setCartOpen(false); setInvDisc(''); setCustName(''); setCustPhone(''); setCustId(0); setPickOpen(false); setCustQ(''); setRedeem(''); setPtsPick(false);
             setCustomers(null); setLoy(null);
-            onDone(inv, items);
+            onDone(inv, items, timing);
             onNeedRefresh();
-        } catch (e: any) {
-            if (e?.data?.error === 'insufficient_stock') {
-                notify('الكمية المطلوبة أكبر من المخزون المتاح للصنف ' + e.data.code, true);
+        }, (d) => {
+            if (d?.error === 'insufficient_stock') {
+                notify('الكمية المطلوبة أكبر من المخزون المتاح للصنف ' + d.code, true);
                 onNeedRefresh();
-            } else if (e?.data?.error === 'not_enough_points' || e?.data?.error === 'too_many_points') {
+            } else if (d?.error === 'not_enough_points' || d?.error === 'too_many_points') {
                 notify('النقاط المطلوبة أكتر من المتاح، عدّل العدد', true);
             } else {
                 notify('حصلت مشكلة في تسجيل البيع، جرب تاني', true);
             }
-        }
-        setBusy(false);
+        });
     };
+
+    const pendBanner = pend && pend.state === 'unconfirmed' ? (
+        <div style={{ margin: '0 0 10px', padding: '10px 12px', borderRadius: 12, background: '#fff3e0', border: '1.5px solid var(--amber)', fontSize: 13, lineHeight: 1.7 }}>
+            <b>⚠️ الرد على تسجيل البيع ({fmt(pend.total)} ج، {pend.count} صنف) اتأخر، ومش متأكدين إن الفاتورة اتسجلت.</b>
+            <div>متسجلش نفس السلة تاني. زرار «إعادة المحاولة» بيبعت نفس الطلب بنفس المفتاح: لو الفاتورة اتسجلت هترجع هي نفسها، ولو ما اتسجلتش هتتسجل دلوقتي مرة واحدة.</div>
+            <button className="btn btn-amber btn-block" style={{ marginTop: 8 }} disabled={pend.retryBusy} onClick={retrySale}>{pend.retryBusy ? 'جاري إعادة المحاولة…' : 'إعادة المحاولة بنفس العملية'}</button>
+        </div>
+    ) : null;
+
+    const fold = (label: string, open: boolean, setOpen: (v: boolean) => void, summary: string, body: React.ReactNode) => (
+        <div className="field">
+            <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', border: '1.5px solid var(--line)', borderRadius: 12, padding: '11px 13px', background: '#f8fafd', color: 'var(--navy)', fontWeight: 700, fontSize: 13, textAlign: 'start' }}>
+                <span style={{ flex: 1 }}>{label}</span>
+                {!open && summary ? <span dir="ltr" style={{ color: 'var(--ink)', fontWeight: 600 }}>{summary}</span> : null}
+                <span style={{ fontSize: 16, lineHeight: 1, display: 'inline-block', transform: open ? 'rotate(180deg)' : 'none' }}>▾</span>
+            </button>
+            {open ? body : null}
+        </div>
+    );
 
     return (
         <>
+            {!cartOpen ? pendBanner : null}
+            {quoteMode ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0 0 10px', padding: '10px 12px', borderRadius: 12, background: '#fff8ea', border: '1.5px dashed var(--amber)' }}>
+                    <b style={{ fontSize: 13, color: 'var(--navy)', flex: 1 }}>💾 عرض سعر جديد — مش هيسجّل بيع ومش هينقص المخزون</b>
+                    <button className="btn btn-ghost btn-sm" onClick={() => onQuoteExit?.(false)}>إلغاء</button>
+                </div>
+            ) : null}
             <div className="search-wrap">
                 <div className="search-box">
                     <span className="si"><Icon n="search" size={20} /></span>
@@ -228,7 +265,7 @@ export default function SellScreen({
             {cart.length > 0 && !cartOpen ? (
                 <button className="cart-bar" onClick={() => setCartOpen(true)}>
                     <span className="cnt">{count}</span>
-                    <span>عرض الفاتورة</span>
+                    <span>{quoteMode ? 'عرض السعر' : 'عرض الفاتورة'}</span>
                     <span className="tot">{fmt(total)} ج</span>
                 </button>
             ) : null}
@@ -238,10 +275,13 @@ export default function SellScreen({
                     <div className="sheet-back" onClick={() => setCartOpen(false)} />
                     <div className="sheet">
                         <div className="sheet-h">
-                            <h3>🧾 فاتورة جديدة</h3>
+                            <h3>{quoteMode ? '💾 عرض سعر جديد' : '🧾 فاتورة جديدة'}</h3>
                             <button className="btn btn-ghost btn-sm" style={{ marginInlineStart: 'auto' }} onClick={() => setCartOpen(false)}>رجوع للأصناف</button>
                         </div>
                         <div className="sheet-b">
+                            <span data-dirty="0" hidden />
+                            {pendBanner}
+                            <fieldset disabled={!!pend} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
                             {cart.map((l) => (
                                 <div className="cline" key={l.code}>
                                     <div className="cn">
@@ -259,10 +299,15 @@ export default function SellScreen({
                             ))}
 
                             <div style={{ margin: '14px 0 6px' }}>
-                                <div className="field">
-                                    <label>خصم على الفاتورة كلها (جنيه)</label>
-                                    <input inputMode="decimal" value={invDisc} onChange={(e) => setInvDisc(e.target.value)} placeholder="0" />
-                                </div>
+                                {fold('خصم على الفاتورة كلها (جنيه)', discOpen, setDiscOpen, invDisc.trim() ? invDisc.trim() + ' ج' : '', (
+                                    <input inputMode="decimal" value={invDisc} onChange={(e) => setInvDisc(e.target.value)} placeholder="0" style={{ marginTop: 5 }} />
+                                ))}
+                                {quoteMode ? (
+                                    <div className="field">
+                                        <label>اسم العميل (اختياري)</label>
+                                        <input value={custName} onChange={(e) => setCustName(e.target.value)} placeholder="اسم العميل" />
+                                    </div>
+                                ) : (
                                 <div className="field">
                                     <label>اسم العميل{payment === 'debt' ? '' : ' (اختياري)'}</label>
                                     <div style={{ position: 'relative', marginBottom: 12 }}>
@@ -299,23 +344,27 @@ export default function SellScreen({
                                         </div>
                                     ) : null}
                                 </div>
-                                {payment !== 'debt' ? (
-                                    <>
-                                        <div className="field">
-                                            <label>رقم واتساب العميل (اختياري — لإرسال الفاتورة)</label>
-                                            <input inputMode="tel" dir="ltr" style={{ textAlign: 'end' }} value={custPhone} onChange={(e) => setCustPhone(e.target.value)} placeholder="01xxxxxxxxx" />
-                                        </div>
-                                    </>
-                                ) : null}
+                                )}
+                                {quoteMode || payment !== 'debt' ? fold('رقم واتساب العميل (اختياري — لإرسال الفاتورة)', waOpen, setWaOpen, custPhone.trim(), (
+                                    <input inputMode="tel" dir="ltr" style={{ textAlign: 'end', marginTop: 5 }} value={custPhone} onChange={(e) => setCustPhone(e.target.value)} placeholder="01xxxxxxxxx" />
+                                )) : null}
                             </div>
+                            </fieldset>
                         </div>
                         <div style={{ padding: '12px 18px calc(14px + env(safe-area-inset-bottom))', borderTop: '1px solid var(--line)', display: 'grid', gap: 8 }}>
-                            <button className="btn btn-amber btn-block" disabled={busy || !cart.length} onClick={submit}>
-                                {busy ? 'جاري التسجيل…' : `✅ تسجيل البيع — ${fmt(total)} ج`}
-                            </button>
-                            <button className="btn btn-ghost btn-block" disabled={busy || !cart.length} onClick={saveQuote}>
-                                💾 حفظ كعرض سعر (من غير ما ينقص المخزون)
-                            </button>
+                            {pendBanner}
+                            {quoteMode ? (
+                                <button className="btn btn-amber btn-block" disabled={busy || !cart.length} onClick={saveQuote}>
+                                    {busy ? 'جاري الحفظ…' : `💾 حفظ عرض السعر — ${fmt(subtotal - disc0)} ج`}
+                                </button>
+                            ) : (
+                                <>
+                                <button className="btn btn-amber btn-block" disabled={busy || !cart.length || !!pend} onClick={submit}>
+                                    {pend ? (pend.state === 'sending' ? 'جاري التسجيل…' : 'نتيجة البيع لسه مش مؤكدة') : `✅ تسجيل البيع — ${fmt(total)} ج`}
+                                </button>
+                                {slow ? <div style={{ fontSize: 12.5, color: 'var(--muted)', textAlign: 'center' }}>التسجيل بياخد وقت… متقفلش التطبيق ومتكررش الضغط.</div> : null}
+                                </>
+                            )}
                         </div>
                     </div>
                 </>

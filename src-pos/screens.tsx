@@ -25,10 +25,10 @@ const norm = (t: string) => (t || '').toLowerCase().replace(/[\u064B-\u0652\u064
 const smartMatch = (hay: string, q: string) => { const t = norm(q); if (!t) return true; const h = norm(hay); return t.split(' ').every((w) => h.includes(w)); };
 
 // ---------- فواتير ----------
-export function InvoicesScreen({ staff, openInvoice, openQuote, notify }: { staff: Staff; openInvoice: (id: number) => void; openQuote: (id: number) => void; notify: (m: string, b?: boolean) => void }) {
+export function InvoicesScreen({ staff, openInvoice, openQuote, notify, initialView, startQuote }: { initialView?: 'mine' | 'quotes'; startQuote?: () => void; staff: Staff; openInvoice: (id: number) => void; openQuote: (id: number) => void; notify: (m: string, b?: boolean) => void }) {
     const [list, setList] = useState<Invoice[]>([]);
     const [quotes, setQuotes] = useState<Quote[]>([]);
-    const [view, setView] = useState<'mine' | 'all' | 'quotes'>('mine');
+    const [view, setView] = useState<'mine' | 'all' | 'quotes'>(initialView || 'mine');
     const [loading, setLoading] = useState(true);
     const manager = staff.role === 'manager';
 
@@ -82,8 +82,9 @@ export function InvoicesScreen({ staff, openInvoice, openQuote, notify }: { staf
                 {manager ? <button className={view === 'all' ? 'on' : ''} onClick={() => setView('all')}>كل الفواتير</button> : null}
                 <button className={view === 'quotes' ? 'on' : ''} onClick={() => setView('quotes')}>💾 عروض الأسعار</button>
             </div>
+            {view === 'quotes' && startQuote ? <button className="btn btn-amber btn-block" style={{ marginBottom: 10 }} onClick={startQuote}>➕ إضافة عرض سعر</button> : null}
             {view === 'quotes' ? (
-                loading ? <div className="empty">جاري التحميل…</div> : quotes.length === 0 ? <div className="empty">مفيش عروض أسعار لسه — احفظ واحد من السلة بزرار 💾</div> : quotes.map((q) => (
+                loading ? <div className="empty">جاري التحميل…</div> : quotes.length === 0 ? <div className="empty">مفيش عروض أسعار لسه — اضغط «إضافة عرض سعر»</div> : quotes.map((q) => (
                     <button key={q.id} className="inv-row" style={{ width: '100%', border: '1.5px solid var(--line)', textAlign: 'start' }} onClick={() => openQuote(q.id)}>
                         <div>
                             <div className="n">{q.num}</div>

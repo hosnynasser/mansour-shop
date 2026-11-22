@@ -3,6 +3,7 @@ import PN from './Bidi';
 import { createPortal } from 'react-dom';
 import { api, buildWaText, clearCred, cred, fmt, fmtTime, paymentLabel, quoteAsInvoice, saveCred, cget, cset, csetIf, clearCache, Customer, Invoice, InvoiceItem, Product, Quote, Staff } from './lib';
 import SellScreen from './SellScreen';
+import { dropOp } from './saleOp';
 import { CloseScreen, CustomersScreen, InvoicesScreen, ReportsScreen, StaffScreen, StockScreen } from './screens';
 import PurchasesScreen from './PurchasesScreen';
 import PrintDoc from './PrintDoc';
@@ -170,7 +171,9 @@ export default function App() {
     const [categories, setCategories] = useState<string[]>([]);
     const [products, setProducts] = useState<Product[]>([]);
     const [toast, setToast] = useState<{ msg: string; bad: boolean } | null>(null);
-    const [done, setDone] = useState<{ inv: Invoice; items: InvoiceItem[] } | null>(null);
+    const [done, setDone] = useState<{ inv: Invoice; items: InvoiceItem[]; timing?: string } | null>(null);
+    const [quoteMode, setQuoteMode] = useState(false);
+    const [invView, setInvView] = useState<'mine' | 'quotes'>('mine');
     const [detail, setDetail] = useState<{ inv: Invoice; items: InvoiceItem[] } | null>(null);
     const [printJob, setPrintJob] = useState<{ inv: Invoice; items: InvoiceItem[]; mode: 'r80' | 'a4' } | null>(null);
     const [quoteDetail, setQuoteDetail] = useState<{ quote: Quote; items: InvoiceItem[] } | null>(null);
@@ -236,7 +239,7 @@ export default function App() {
                     const me = await api('/api/pos/me');
                     setStaff(me); cset('me', me);
                     await pr;
-                } catch (e: any) { if (e?.message === 'unauthorized' || !cm) { clearCred(); setStaff(null); } }
+                } catch (e: any) { if (e?.message === 'unauthorized' || !cm) { dropOp(); clearCred(); setStaff(null); } }
             }
             setBooting(false);
         })();
@@ -377,22 +380,22 @@ export default function App() {
 
             <div className="pos-main">
               <div className="screen-in" key={tab + (tab === 'settings' ? sub : '')}>
-                {tab === 'sell' ? <SellScreen presetCust={sellCust} onPresetUsed={() => setSellCust(0)} products={products} categories={categories} onDone={(inv, items) => { setDone({ inv, items }); }} onNeedRefresh={refreshProducts} notify={notify} /> : null}
-                {tab === 'invoices' ? <InvoicesScreen staff={staff} openInvoice={openInvoice} openQuote={openQuote} notify={notify} /> : null}
+                {tab === 'sell' ? <SellScreen quoteMode={quoteMode} onQuoteExit={(saved) => { setQuoteMode(false); setInvView('quotes'); setTab('invoices'); setSub('menu'); }} presetCust={sellCust} onPresetUsed={() => setSellCust(0)} products={products} categories={categories} onDone={(inv, items, timing) => { setDone({ inv, items, timing }); }} onNeedRefresh={refreshProducts} notify={notify} /> : null}
+                {tab === 'invoices' ? <InvoicesScreen staff={staff} openInvoice={openInvoice} openQuote={openQuote} notify={notify} initialView={invView} startQuote={() => { setQuoteMode(true); setTab('sell'); setSub('menu'); }} /> : null}
                 {tab === 'customers' ? <CustomersScreen staff={staff} openInvoice={openInvoice} notify={notify} startDebtInvoice={(id) => { setSellCust(id); setTab('sell'); setSub('menu'); }} /> : null}
                 {tab === 'stock' ? <StockScreen staff={staff} products={products} categories={categories} refresh={refreshProducts} notify={notify} /> : null}
                 {tab === 'settings' ? (
                     <SettingsArea sub={sub} setSub={setSub} staff={staff} manager={manager} chqAlerts={chqAlerts} notify={notify}
                         categories={categories} products={products} refresh={refreshProducts}
                         onChequesChanged={() => refreshChequeAlerts(false)}
-                        onLogout={() => { if (confirm('تسجيل الخروج؟')) { clearCred(); setStaff(null); setTab('sell'); setSub('menu'); } }} />
+                        onLogout={() => { if (confirm('تسجيل الخروج؟')) { dropOp(); clearCred(); setStaff(null); setTab('sell'); setSub('menu'); } }} />
                 ) : null}
               </div>
             </div>
 
             <nav className="pos-nav">
                 {tabs.filter((t) => !t.managerOnly || manager).map((t) => (
-                    <button key={t.id} className={tab === t.id ? 'on' : ''} onClick={() => { setTab(t.id); setSub('menu'); }}>
+                    <button key={t.id} className={tab === t.id ? 'on' : ''} onClick={() => { setTab(t.id); setSub('menu'); if (t.id !== 'sell') setQuoteMode(false); if (t.id === 'invoices') setInvView('mine'); }}>
                         <span className="ni" style={{ position: 'relative' }}><Icon n={t.icon} size={22} />{t.id === 'settings' && manager && chqAlerts > 0 ? <i style={{ position: 'absolute', top: -4, insetInlineEnd: -9, background: 'var(--danger)', color: '#fff', borderRadius: 999, fontSize: 10, fontStyle: 'normal', fontWeight: 800, minWidth: 16, height: 16, lineHeight: '16px', textAlign: 'center' }}>{chqAlerts}</i> : null}</span>{t.label}
                     </button>
                 ))}
@@ -409,6 +412,7 @@ export default function App() {
                                 <h2>تم تسجيل البيع</h2>
                                 <div className="no">{done.inv.num} · {paymentLabel(done.inv.payment)}</div>
                                 <div className="tt">{fmt(done.inv.total)} ج</div>
+                                {done.timing ? <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>{done.timing}</div> : null}
                             </div>
                             <div style={{ display: 'grid', gap: 8 }}>
                                 <button className="btn btn-blue btn-block" onClick={() => setPrintJob({ ...done, mode: 'r80' })}>🖨️ طباعة إيصال (80مم)</button>
