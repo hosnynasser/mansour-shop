@@ -20,9 +20,8 @@ function SettingsArea({ sub, setSub, staff, manager, chqAlerts, notify, categori
         { id: 'close', icon: 'calc', label: 'التقفيلة' },
         { id: 'purchases', icon: 'truck', label: 'المشتريات والموردين والشيكات', mgr: true },
         { id: 'reports', icon: 'chart', label: 'التقارير', mgr: true },
-        { id: 'staff', icon: 'clock', label: 'الموظفين والمرتبات', mgr: true },
+        { id: 'staff', icon: 'users', label: 'الحسابات والموظفين' },
         { id: 'cats', icon: 'tag', label: 'تصنيفات الأصناف', mgr: true },
-        { id: 'account', icon: 'settings', label: 'حسابي: تغيير اسم الدخول والباسورد' },
     ];
     if (sub !== 'menu') {
         const cur = items.find((i) => i.id === sub);
@@ -33,7 +32,7 @@ function SettingsArea({ sub, setSub, staff, manager, chqAlerts, notify, categori
                 {sub === 'close' ? <CloseScreen staff={staff} notify={notify} /> : null}
                 {sub === 'purchases' && manager ? <PurchasesScreen products={products} refresh={refresh} notify={notify} onChequesChanged={onChequesChanged} /> : null}
                 {sub === 'reports' && manager ? <ReportsScreen notify={notify} /> : null}
-                {sub === 'staff' && manager ? <StaffHub me={staff} notify={notify} /> : null}
+                {sub === 'staff' ? <AccountsHub me={staff} manager={manager} notify={notify} /> : null}
                 {sub === 'account' ? <AccountScreen staff={staff} notify={notify} /> : null}
                 {sub === 'cats' && manager ? <CategoriesScreen categories={categories} products={products} refresh={refresh} notify={notify} /> : null}
             </>
@@ -129,6 +128,21 @@ function CategoriesScreen({ categories, products, refresh, notify }: { categorie
     );
 }
 
+function AccountsHub({ me, manager, notify }: { me: Staff; manager: boolean; notify: (m: string, b?: boolean) => void }) {
+    const [v, setV] = useState<'me' | 'staff'>('me');
+    return (
+        <>
+            {manager ? (
+                <div className="pay-toggle" style={{ marginBottom: 12 }}>
+                    <button className={v === 'me' ? 'on' : ''} onClick={() => setV('me')}>👤 حسابي</button>
+                    <button className={v === 'staff' ? 'on' : ''} onClick={() => setV('staff')}>👥 الموظفين والمرتبات</button>
+                </div>
+            ) : null}
+            {v === 'me' || !manager ? <AccountScreen staff={me} notify={notify} /> : <StaffHub me={me} notify={notify} />}
+        </>
+    );
+}
+
 function StaffHub({ me, notify }: { me: Staff; notify: (m: string, b?: boolean) => void }) {
     const [v, setV] = useState<'acc' | 'pay'>('acc');
     const [names, setNames] = useState<string[]>([]);
@@ -209,6 +223,7 @@ export default function App() {
         } catch {}
     }, [notify]);
     useEffect(() => { if (staff && staff.role === 'manager') refreshChequeAlerts(true); }, [staff?.user, staff?.role]);
+    useEffect(() => { if (staff && staff.role === 'manager') api('/api/pos/suppliers').then((r) => cset('suppliers', r.suppliers || [])).catch(() => {}); }, [staff?.user, staff?.role]);
 
     useEffect(() => {
         (async () => {

@@ -111,12 +111,13 @@ export function InvoicesScreen({ staff, openInvoice, openQuote, notify }: { staf
 
 // ---------- تبويب الموردين (نفس بيانات المشتريات الحالية، عرض بس) ----------
 function SuppliersPane({ notify }: { notify: (m: string, b?: boolean) => void }) {
-    const [list, setList] = useState<any[] | null>(null);
+    const [list, setList] = useState<any[] | null>(() => cget<any[]>('suppliers'));
+    const [fresh, setFresh] = useState(false);
     const [q, setQ] = useState('');
     const [grpSel, setGrpSel] = useState('');
     const [newOpen, setNewOpen] = useState(false);
     const [det, setDet] = useState<any>(null);
-    const load = async () => { try { const r = await api('/api/pos/suppliers'); setList(r.suppliers || []); } catch { notify('مشكلة في تحميل الموردين', true); setList([]); } };
+    const load = async () => { try { const r = await api('/api/pos/suppliers'); setList(r.suppliers || []); cset('suppliers', r.suppliers || []); setFresh(true); } catch { notify('مشكلة في تحميل الموردين، الأرقام المعروضة قديمة', true); setList((l) => l || []); } };
     useEffect(() => { load(); }, []);
     const open = async (id: number) => { try { const r = await api('/api/pos/supplier/' + id); setDet({ s: r.supplier, purchases: r.purchases || [] }); } catch { notify('مشكلة في فتح المورد', true); } };
     const all = list || [];
@@ -140,6 +141,7 @@ function SuppliersPane({ notify }: { notify: (m: string, b?: boolean) => void })
                 <Cell l="عليا (للموردين)" v={fmt(owed) + ' ج'} c="var(--danger)" />
                 <Cell l={net >= 0 ? 'الصافي (ليا)' : 'الصافي (عليا)'} v={fmt(Math.abs(net)) + ' ج'} />
             </div>
+            {!fresh ? <div style={{ fontSize: 12, color: 'var(--muted)', textAlign: 'center', margin: '-2px 0 6px' }}>بيتحدّث… الأرقام دي من آخر مرة</div> : null}
             <div className="search-wrap" style={{ top: 0 }}>
                 <div className="search-box" style={{ padding: '7px 12px' }}>
                     <span className="si"><Icon n="search" size={18} /></span>
@@ -579,6 +581,7 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
     const dcache = useRef<Map<number, any>>(new Map());
     const prefetch = (id: number) => { if (dcache.current.has(id)) return; dcache.current.set(id, api('/api/pos/customer/' + id).catch(() => null)); };
     const [debtOpen, setDebtOpen] = useState(false);
+    const [payOpen, setPayOpen] = useState(false);
     const [debtAmt, setDebtAmt] = useState('');
     const [debtNote, setDebtNote] = useState('');
     const [payAmt, setPayAmt] = useState('');
@@ -639,7 +642,7 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
         try {
             await api(`/api/pos/customer/${detail.customer.id}/payment`, 'POST', { amount: amt, method: payMethod, key: keyFor('pay', `${detail.customer.id}|${amt}|${payMethod}`) });
             delete keys.current.pay;
-            notify('اتسجلت الدفعة ✓'); setPayAmt('');
+            notify('اتسجلت الدفعة ✓'); setPayAmt(''); setPayOpen(false);
             refreshDetail(detail.customer.id);
         } catch { notify('مشكلة في تسجيل الدفعة', true); }
         inflight.current = false;
@@ -761,7 +764,7 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
             {detail ? (
                 <>
                     <div className="sheet-back" onClick={() => setDetail(null)} />
-                    <div className="sheet">
+                    <div className="sheet tall">
                         <div className="sheet-h">
                             {manager && !editMode && !detail.loading ? (
                                 <>
@@ -787,21 +790,16 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
                                 </>
                             ) : (
                                 <>
-                                    <div style={{ textAlign: 'center', padding: '8px 0 14px' }}>
-                                        <div style={{ fontSize: 13, color: 'var(--muted)' }}>{detail.customer.phone || 'بدون تليفون'}{detail.customer.notes ? ' · ' + detail.customer.notes : ''}</div>
-                                        <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 8 }}>الرصيد المستحق</div>
-                                        <div style={{ fontSize: 30, fontWeight: 800, color: detail.balance > 0 ? 'var(--danger)' : 'var(--ink)' }}>{fmt(detail.balance)} ج</div>
+                                    <div className="bal-card">
+                                        <div className="l">الرصيد المستحق على العميل</div>
+                                        <div className="v" style={{ color: detail.balance > 0 ? 'var(--danger)' : detail.balance < 0 ? '#0f7a44' : 'var(--ink)' }}>{fmt(Math.abs(detail.balance))} ج{detail.balance < 0 ? ' (له)' : ''}</div>
+                                        <div className="s">{detail.customer.phone || 'بدون تليفون'}{detail.customer.grp ? ' · ' + detail.customer.grp : ''}{detail.customer.notes ? ' · ' + detail.customer.notes : ''}</div>
                                     </div>
-                                    
+                                    {!detail.loading && startDebtInvoice ? (
+                                        <button className="btn btn-blue btn-sm btn-block" style={{ minHeight: 44, marginBottom: 12 }} onClick={() => { const id = detail.customer.id; setDetail(null); startDebtInvoice(id); }}>فاتورة آجل جديدة</button>
+                                    ) : null}
                                 </>
                             )}
-
-                            {!editMode && !detail.loading ? (
-                                <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
-                                    {startDebtInvoice ? <button className="btn btn-blue btn-sm" style={{ minHeight: 44 }} onClick={() => { const id = detail.customer.id; setDetail(null); startDebtInvoice(id); }}>فاتورة آجل جديدة</button> : null}
-                                    {manager ? <button className="btn btn-ghost btn-sm" style={{ minHeight: 44 }} onClick={() => setDebtOpen((v) => !v)}>+ إضافة دين</button> : null}
-                                </div>
-                            ) : null}
 
                             {debtOpen && manager && !editMode && !detail.loading ? (
                                 <div className="close-card">
@@ -816,11 +814,11 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
                                 </div>
                             ) : null}
 
-                            {detail.balance <= 0 && !editMode && !detail.loading ? (
-                                <div className="close-card"><h4>💵 تسجيل دفعة</h4><div style={{ fontSize: 13, color: 'var(--muted)' }}>مفيش دين على العميل دلوقتي. لو عليه فلوس قديمة، {manager ? 'اضغط «إضافة دين» الأول' : 'المدير يضيفها الأول'}، أو سجّل فاتورة آجل.</div></div>
+                            {payOpen && detail.balance <= 0 && !editMode && !detail.loading ? (
+                                <div className="close-card"><h4>💵 تسجيل دفعة</h4><div style={{ fontSize: 13, color: 'var(--muted)' }}>مفيش دين على العميل دلوقتي. لو عليه فلوس قديمة، {manager ? 'اضغط «إضافة دين» الأول.' : 'المدير يسجلها الأول.'}</div></div>
                             ) : null}
 
-                            {detail.balance > 0 && !editMode && !detail.loading ? (
+                            {payOpen && detail.balance > 0 && !editMode && !detail.loading ? (
                                 <div className="close-card">
                                     <h4>💵 تسجيل دفعة (بتتخصم من الدين)</h4>
                                     <div className="field"><input inputMode="decimal" placeholder="المبلغ" value={payAmt} onChange={(e) => setPayAmt(e.target.value)} /></div>
@@ -836,16 +834,33 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
                                 </div>
                             ) : null}
 
-                            <h4 style={{ color: 'var(--navy)', margin: '14px 0 8px' }}>كشف الحساب</h4>
-                            {detail.loading ? <div className="empty" style={{ padding: 16 }}>جاري تحميل الحركات…</div> : detail.ledger.length === 0 ? <div className="empty" style={{ padding: 16 }}>مفيش حركات</div> : detail.ledger.map((l) => (
-                                <div className="close-line" key={l.id}>
-                                    <span>{l.kind === 'charge' ? (l.invoice_id ? 'فاتورة' : 'مديونية سابقة') : '💵 دفعة'} · {fmtTime(l.ts)} · {l.staff}{l.note ? ' · ' + l.note : ''}</span>
-                                    <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
-                                        <b style={{ color: l.kind === 'charge' ? 'var(--danger)' : '#0f7a44' }}>{l.kind === 'charge' ? '+' : '-'}{fmt(l.amount)}</b>
-                                        {manager && (l.kind === 'payment' || !l.invoice_id) ? <button className="btn btn-danger btn-sm" style={{ padding: '3px 8px', fontSize: 12 }} onClick={() => delPayment(l.id)}>×</button> : null}
-                                    </span>
-                                </div>
-                            ))}
+                            <h4 style={{ color: 'var(--navy)', margin: '14px 0 8px' }}>المعاملات{!detail.loading ? ' (' + detail.ledger.length + ')' : ''}</h4>
+                            {detail.loading ? <div className="empty" style={{ padding: 16 }}>جاري تحميل الحركات…</div> : detail.ledger.length === 0 ? <div className="empty" style={{ padding: 16 }}>مفيش حركات</div> : (() => {
+                                let run = Math.round((detail.balance || 0) * 100) / 100;
+                                return detail.ledger.map((l: any) => {
+                                    const after = run;
+                                    run = Math.round((run - (l.kind === 'charge' ? l.amount : -l.amount)) * 100) / 100;
+                                    const isCharge = l.kind === 'charge';
+                                    const label = isCharge ? (l.invoice_id ? 'فاتورة آجل' : 'دين') : 'دفعة';
+                                    return (
+                                        <div className="tx-row" key={l.id}>
+                                            <span className={'tx-ic ' + (isCharge ? 'up' : 'down')} aria-hidden="true">
+                                                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">{isCharge ? <><path d="M12 19V5" /><path d="M6 11l6-6 6 6" /></> : <><path d="M12 5v14" /><path d="M6 13l6 6 6-6" /></>}</svg>
+                                            </span>
+                                            <div className="tx-mid">
+                                                <div className="tx-d">{fmtTime(l.ts)}</div>
+                                                <div className="tx-b">الرصيد بعدها: {fmt(Math.abs(after))} ج{after < 0 ? ' (له)' : ''}</div>
+                                                {l.note || l.staff ? <div className="tx-n">{l.note ? l.note + ' · ' : ''}{l.staff}</div> : null}
+                                            </div>
+                                            <div className="tx-amt">
+                                                <b style={{ color: isCharge ? 'var(--danger)' : '#0f7a44' }}>{fmt(l.amount)} ج</b>
+                                                <span>{label}</span>
+                                                {manager && (l.kind === 'payment' || !l.invoice_id) ? <button className="btn btn-danger btn-sm" style={{ padding: '2px 8px', fontSize: 12, marginTop: 2 }} onClick={() => delPayment(l.id)}>×</button> : null}
+                                            </div>
+                                        </div>
+                                    );
+                                });
+                            })()}
 
                             {detail.invoices.length > 0 ? (
                                 <>
@@ -863,6 +878,12 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
                                 </>
                             ) : null}
                         </div>
+                        {!editMode && !detail.loading ? (
+                            <div className="detail-bar">
+                                {manager ? <button className="btn db-debt" onClick={() => { setDebtOpen((v) => !v); setPayOpen(false); document.querySelector('.sheet.tall .sheet-b')?.scrollTo({ top: 0, behavior: 'smooth' }); }}>+ إضافة دين</button> : null}
+                                <button className="btn db-pay" onClick={() => { setPayOpen((v) => !v); setDebtOpen(false); document.querySelector('.sheet.tall .sheet-b')?.scrollTo({ top: 0, behavior: 'smooth' }); }}>تسجيل دفعة</button>
+                            </div>
+                        ) : null}
                     </div>
                 </>
             ) : null}
