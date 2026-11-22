@@ -193,7 +193,7 @@ export function StockScreen({ staff, products, categories, refresh, notify }: { 
                 </div>
             </div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-                <CatChips categories={categories} sel={catSel} setSel={(c) => { setCatSel(c); setLowOnly(false); }} />
+                <CatChips categories={categories} sel={catSel} setSel={(c) => { setCatSel(c); setLowOnly(false); }} products={products} />
                 <div className="cat-dd"><button className={'cat-dd-btn' + (lowOnly ? ' on' : '')} style={lowOnly ? { background: 'var(--danger)', borderColor: 'var(--danger)' } : { color: low.length ? 'var(--danger)' : undefined }} onClick={() => { setLowOnly(!lowOnly); setCatSel(''); }}>النواقص {low.length}</button></div>
             </div>
             {manager ? <button className="btn btn-amber btn-block" style={{ marginBottom: 10 }} onClick={() => setForm({ mode: 'add', name: '', code: '', price: '', cost: '', qty: '', cat: '' })}><Icon n="plus" size={18} /> إضافة صنف جديد</button> : null}
@@ -467,7 +467,10 @@ export function CustomersScreen({ staff, openInvoice, notify }: { staff: Staff; 
     const [name, setName] = useState('');
     const [phone, setPhone] = useState('');
     const [busy, setBusy] = useState(false);
-    const [detail, setDetail] = useState<{ customer: Customer; ledger: LedgerEntry[]; balance: number; invoices: any[]; points?: number; pointsLog?: any[]; loyalty?: Loyalty } | null>(null);
+    const [detail, setDetail] = useState<{ customer: Customer; ledger: LedgerEntry[]; balance: number; invoices: any[]; points?: number; pointsLog?: any[]; loyalty?: Loyalty; loading?: boolean } | null>(null);
+    const reqRef = useRef(0);
+    const dcache = useRef<Map<number, any>>(new Map());
+    const prefetch = (id: number) => { if (dcache.current.has(id)) return; dcache.current.set(id, api('/api/pos/customer/' + id).catch(() => null)); };
     const [payAmt, setPayAmt] = useState('');
     const [payMethod, setPayMethod] = useState<'cash' | 'vcash'>('cash');
     const [editMode, setEditMode] = useState(false);
@@ -480,9 +483,22 @@ export function CustomersScreen({ staff, openInvoice, notify }: { staff: Staff; 
     };
     useEffect(() => { load(); }, []);
 
+    // بيفتح الكارت فوراً من بيانات القايمة، وبعدين يكمّل الحركات والفواتير لما توصل (مع بداية التحميل من أول لمسة)
     const openDetail = async (id: number) => {
-        try { const r = await api('/api/pos/customer/' + id); setDetail(r); setPayAmt(''); setEditMode(false); }
-        catch { notify('مشكلة في فتح العميل', true); }
+        const row = list.find((c) => c.id === id);
+        const my = ++reqRef.current;
+        setPayAmt(''); setEditMode(false);
+        if (row) setDetail({ customer: { ...row, phone: row.phone || '', notes: row.notes || '' } as Customer, ledger: [], balance: row.balance || 0, invoices: [], loading: true });
+        const pending = dcache.current.get(id);
+        dcache.current.delete(id);
+        try {
+            const r = (pending ? await pending : null) || await api('/api/pos/customer/' + id);
+            if (reqRef.current !== my) return;
+            setDetail(r);
+        } catch {
+            if (reqRef.current !== my) return;
+            setDetail(null); notify('مشكلة في فتح العميل', true);
+        }
     };
     const refreshDetail = async (id: number) => {
         try { const r = await api('/api/pos/customer/' + id); setDetail(r); } catch {}
@@ -554,7 +570,7 @@ export function CustomersScreen({ staff, openInvoice, notify }: { staff: Staff; 
             ) : null}
             <button className="btn btn-navy btn-block" style={{ marginBottom: 12 }} onClick={() => setAddOpen(true)}><Icon n="plus" size={18} /> إضافة عميل</button>
             {loading ? <div className="empty">جاري التحميل…</div> : filtered.length === 0 ? <div className="empty">{list.length === 0 ? 'مفيش عملاء لسه — ضيف أول عميل' : 'مفيش نتايج للبحث'}</div> : filtered.slice(0, shown).map((c) => (
-                <button key={c.id} className="inv-row" style={{ width: '100%', textAlign: 'start' }} onClick={() => openDetail(c.id)}>
+                <button key={c.id} className="inv-row" style={{ width: '100%', textAlign: 'start' }} onPointerDown={() => prefetch(c.id)} onClick={() => openDetail(c.id)}>
                     <div>
                         <div className="n">{c.name}</div>
                         <div className="m">{c.phone || 'بدون تليفون'}</div>
@@ -606,7 +622,7 @@ export function CustomersScreen({ staff, openInvoice, notify }: { staff: Staff; 
                                         <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 8 }}>الرصيد المستحق</div>
                                         <div style={{ fontSize: 30, fontWeight: 800, color: detail.balance > 0 ? 'var(--danger)' : 'var(--ink)' }}>{fmt(detail.balance)} ج</div>
                                     </div>
-                                    {manager ? (
+                                    {manager && !detail.loading ? (
                                         <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
                                             <button className="btn btn-ghost btn-sm" onClick={() => setEditMode(true)}>✏️ تعديل</button>
                                             <button className="btn btn-danger btn-sm" onClick={del}>مسح العميل</button>
@@ -615,7 +631,7 @@ export function CustomersScreen({ staff, openInvoice, notify }: { staff: Staff; 
                                 </>
                             )}
 
-                            {detail.balance > 0 && !editMode ? (
+                            {detail.balance > 0 && !editMode && !detail.loading ? (
                                 <div className="close-card">
                                     <h4>💵 تسجيل دفعة</h4>
                                     <div className="field"><input inputMode="decimal" placeholder="المبلغ" value={payAmt} onChange={(e) => setPayAmt(e.target.value)} /></div>
@@ -631,7 +647,7 @@ export function CustomersScreen({ staff, openInvoice, notify }: { staff: Staff; 
                             ) : null}
 
                             <h4 style={{ color: 'var(--navy)', margin: '14px 0 8px' }}>كشف الحساب</h4>
-                            {detail.ledger.length === 0 ? <div className="empty" style={{ padding: 16 }}>مفيش حركات</div> : detail.ledger.map((l) => (
+                            {detail.loading ? <div className="empty" style={{ padding: 16 }}>جاري تحميل الحركات…</div> : detail.ledger.length === 0 ? <div className="empty" style={{ padding: 16 }}>مفيش حركات</div> : detail.ledger.map((l) => (
                                 <div className="close-line" key={l.id}>
                                     <span>{l.kind === 'charge' ? '🧾 فاتورة' : '💵 دفعة'} · {fmtTime(l.ts)} · {l.staff}{l.note ? ' · ' + l.note : ''}</span>
                                     <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>

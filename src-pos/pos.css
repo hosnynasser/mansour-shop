@@ -284,3 +284,6 @@ body{line-height:1.5;letter-spacing:0}
 .cat-dd-list{max-height:min(48vh,380px);overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
 .cat-dd-back{touch-action:none;overscroll-behavior:contain}
 html.dd-lock,html.dd-lock body,html.dd-lock #root,html.dd-lock .pos-main{overflow:hidden!important}
+
+.inv-row,.stock-row,.prod-card,.cat-dd-btn{touch-action:manipulation;cursor:pointer}
+.inv-row{min-height:60px}

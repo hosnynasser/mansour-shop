@@ -179,7 +179,7 @@ export default function SellScreen({
                 </div>
             </div>
 
-            <CatChips categories={categories} sel={catSel} setSel={setCatSel} extraNone={hasUncat} />
+            <CatChips categories={categories} sel={catSel} setSel={setCatSel} extraNone={hasUncat} products={products} />
 
             {filtered.length === 0 ? <div className="empty">مفيش أصناف مطابقة للبحث</div> : (
                 <div className="prod-grid">
