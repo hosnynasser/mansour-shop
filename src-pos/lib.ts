@@ -59,6 +59,18 @@ export async function api(path: string, method = 'GET', body?: any): Promise<any
     return data;
 }
 
+// قراءة (GET) بمهلة: لو الطلب اتعلّق بنقفله ونرمي خطأ بدل ما التحميل يفضل للأبد
+export async function apiT(path: string, ms = 15000): Promise<any> {
+    const ac = new AbortController();
+    const tm = setTimeout(() => ac.abort(), ms);
+    try {
+        const r = await fetch(API_BASE + path, { headers: { 'X-Admin-Code': cred() }, signal: ac.signal });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) { const e: any = new Error(data.error || 'http_' + r.status); e.data = data; throw e; }
+        return data;
+    } finally { clearTimeout(tm); }
+}
+
 export const fmt = (n: number) => (Math.round(n * 100) / 100).toLocaleString('en-EG', { maximumFractionDigits: 2 });
 
 export function cairoToday(): string {

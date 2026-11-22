@@ -23,6 +23,7 @@ const CORS = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type,X-Admin-Code',
+    'Access-Control-Max-Age': '86400',
 };
 
 function json(data, status = 200) {
@@ -677,14 +678,25 @@ async function handlePos(request, env, path) {
     // كارت عميل: بياناته + كشف حساب + فواتيره
     if (path.startsWith('/api/pos/customer/') && request.method === 'GET' && !path.endsWith('/payment')) {
         const id = parseInt(path.slice('/api/pos/customer/'.length), 10) || 0;
-        const customer = await env.POS_DB.prepare('SELECT id, name, phone, notes, grp FROM customers WHERE id = ?').bind(id).first();
+        // كل القراءات في دفعة واحدة (رحلة واحدة لقاعدة البيانات بدل 7 ورا بعض)، والنتيجة نفس الأرقام بالظبط
+        const rs = await env.POS_DB.batch([
+            env.POS_DB.prepare('SELECT id, name, phone, notes, grp FROM customers WHERE id = ?').bind(id),
+            env.POS_DB.prepare('SELECT id, ts, kind, amount, invoice_id, staff, note FROM ledger WHERE customer_id = ? ORDER BY id DESC LIMIT 100').bind(id),
+            env.POS_DB.prepare("SELECT COALESCE(SUM(CASE WHEN kind = 'charge' THEN amount ELSE -amount END), 0) AS b FROM ledger WHERE customer_id = ?").bind(id),
+            env.POS_DB.prepare("SELECT id, num, ts, staff, payment, total, status FROM invoices WHERE customer_id = ? AND status != 'pending' ORDER BY id DESC LIMIT 50").bind(id),
+            env.POS_DB.prepare('SELECT ts, delta, kind, invoice_id, note FROM points_log WHERE customer_id = ? ORDER BY id DESC LIMIT 30').bind(id),
+            env.POS_DB.prepare("SELECT k, v FROM settings WHERE k LIKE 'loyalty_%'"),
+            env.POS_DB.prepare('SELECT COALESCE(SUM(delta), 0) AS p FROM points_log WHERE customer_id = ?').bind(id),
+        ]);
+        const customer = (rs[0].results || [])[0];
         if (!customer) return json({ error: 'not_found' }, 404);
-        const { results: ledger } = await env.POS_DB.prepare('SELECT id, ts, kind, amount, invoice_id, staff, note FROM ledger WHERE customer_id = ? ORDER BY id DESC LIMIT 100').bind(id).all();
-        const bal = await env.POS_DB.prepare("SELECT COALESCE(SUM(CASE WHEN kind = 'charge' THEN amount ELSE -amount END), 0) AS b FROM ledger WHERE customer_id = ?").bind(id).first();
-        const { results: invoices } = await env.POS_DB.prepare("SELECT id, num, ts, staff, payment, total, status FROM invoices WHERE customer_id = ? AND status != 'pending' ORDER BY id DESC LIMIT 50").bind(id).all();
-        const { results: plog } = await env.POS_DB.prepare('SELECT ts, delta, kind, invoice_id, note FROM points_log WHERE customer_id = ? ORDER BY id DESC LIMIT 30').bind(id).all();
-        const settings = await loyaltySettings(env);
-        return json({ customer, ledger: ledger || [], balance: bal?.b ?? 0, invoices: invoices || [], points: await customerPoints(env, id), pointsLog: plog || [], loyalty: settings });
+        const m = new Map((rs[5].results || []).map((r) => [r.k, r.v]));
+        const settings = {
+            earnEvery: Number(m.get('loyalty_earn_every')) || 10,
+            pointValue: Number(m.get('loyalty_point_value')) || 0.5,
+            enabled: m.get('loyalty_enabled') !== '0',
+        };
+        return json({ customer, ledger: rs[1].results || [], balance: (rs[2].results || [])[0]?.b ?? 0, invoices: rs[3].results || [], points: (rs[6].results || [])[0]?.p ?? 0, pointsLog: rs[4].results || [], loyalty: settings });
     }
 
     // تسجيل دفعة من عميل (الكاشير يقدر — تحصيل فلوس شغلانه)

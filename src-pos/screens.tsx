@@ -1,6 +1,6 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import PN from './Bidi';
-import { api, cget, cset, csetIf, cred, cairoToday, fmt, fmtTime, paymentLabel, Customer, Expense, Invoice, LedgerEntry, Product, Quote, Report, Role, Staff } from './lib';
+import { api, apiT, cget, cset, csetIf, cred, cairoToday, fmt, fmtTime, paymentLabel, Customer, Expense, Invoice, LedgerEntry, Product, Quote, Report, Role, Staff } from './lib';
 import Icon from './Icon';
 import CatChips from './CatChips';
 import ScannerModal from './ScannerModal';
@@ -570,7 +570,7 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
     const [name, setName] = useState('');
     const [phone, setPhone] = useState('');
     const [busy, setBusy] = useState(false);
-    const [detail, setDetail] = useState<{ customer: Customer; ledger: LedgerEntry[]; balance: number; invoices: any[]; points?: number; pointsLog?: any[]; loyalty?: Loyalty; loading?: boolean } | null>(null);
+    const [detail, setDetail] = useState<{ customer: Customer; ledger: LedgerEntry[]; balance: number; invoices: any[]; points?: number; pointsLog?: any[]; loyalty?: Loyalty; loading?: boolean; err?: boolean } | null>(null);
     const reqRef = useRef(0);
     const inflight = useRef(false);
     const keys = useRef<Record<string, { sig: string; key: string }>>({});
@@ -583,7 +583,7 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
         return key;
     };
     const dcache = useRef<Map<number, any>>(new Map());
-    const prefetch = (id: number) => { if (dcache.current.has(id)) return; dcache.current.set(id, api('/api/pos/customer/' + id).catch(() => null)); };
+    const prefetch = (id: number) => { if (dcache.current.has(id)) return; dcache.current.set(id, apiT('/api/pos/customer/' + id).catch(() => null)); };
     const [debtOpen, setDebtOpen] = useState(false);
     const [payOpen, setPayOpen] = useState(false);
     const [debtAmt, setDebtAmt] = useState('');
@@ -614,14 +614,18 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
         const pending = dcache.current.get(id);
         dcache.current.delete(id);
         try {
-            const r = (pending ? await pending : null) || await api('/api/pos/customer/' + id);
+            const r = (pending ? await pending : null) || await apiT('/api/pos/customer/' + id);
             if (reqRef.current !== my) return;
             setDetail(r);
         } catch {
             if (reqRef.current !== my) return;
-            setDetail(null); notify('مشكلة في فتح العميل', true);
+            // الكارت يفضل ظاهر بالرصيد من القايمة، وقسم الحركات يعرض خطأ وزر "جرّب تاني" بدل دايرة للأبد
+            if (row) setDetail({ customer: { ...row, phone: row.phone || '', notes: row.notes || '' } as Customer, ledger: [], balance: row.balance || 0, invoices: [], loading: false, err: true });
+            else { setDetail(null); notify('مشكلة في فتح العميل', true); }
         }
     };
+    // لو الكارت اتقفل قبل ما الرد يوصل، الرد المتأخر يتتجاهل (ما يفتحش الكارت تاني)
+    useEffect(() => { if (!detail) reqRef.current++; }, [detail]);
     const refreshDetail = async (id: number) => {
         try { const r = await api('/api/pos/customer/' + id); setDetail(r); } catch {}
         load();
@@ -772,7 +776,7 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
                     <div className="sheet-back" onClick={() => setDetail(null)} />
                     <div className="sheet tall">
                         <div className="sheet-h">
-                            {manager && !editMode && !detail.loading ? (
+                            {manager && !editMode && !(detail.loading || detail.err) ? (
                                 <>
                                     <button className="btn btn-ghost btn-sm" onClick={() => setEditMode(true)}>تعديل</button>
                                     <button className="btn btn-danger btn-sm" onClick={del}>مسح</button>
@@ -801,13 +805,13 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
                                         <div className="v" style={{ color: detail.balance > 0 ? 'var(--danger)' : detail.balance < 0 ? '#0f7a44' : 'var(--ink)' }}>{fmt(Math.abs(detail.balance))} ج{detail.balance < 0 ? ' (له)' : ''}</div>
                                         <div className="s">{detail.customer.phone || 'بدون تليفون'}{detail.customer.grp ? ' · ' + detail.customer.grp : ''}{detail.customer.notes ? ' · ' + detail.customer.notes : ''}</div>
                                     </div>
-                                    {!detail.loading && startDebtInvoice ? (
+                                    {!(detail.loading || detail.err) && startDebtInvoice ? (
                                         <button className="btn btn-blue btn-sm btn-block" style={{ minHeight: 44, marginBottom: 12 }} onClick={() => { const id = detail.customer.id; setDetail(null); startDebtInvoice(id); }}>فاتورة آجل جديدة</button>
                                     ) : null}
                                 </>
                             )}
 
-                            {debtOpen && manager && !editMode && !detail.loading ? (
+                            {debtOpen && manager && !editMode && !(detail.loading || detail.err) ? (
                                 <div className="close-card">
                                     <h4>إضافة دين</h4>
                                     <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 8 }}>بتتسجل في كشف الحساب كرصيد سابق من غير فاتورة، ومش بتدخل في المبيعات.</div>
@@ -820,11 +824,11 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
                                 </div>
                             ) : null}
 
-                            {payOpen && detail.balance <= 0 && !editMode && !detail.loading ? (
+                            {payOpen && detail.balance <= 0 && !editMode && !(detail.loading || detail.err) ? (
                                 <div className="close-card"><h4>💵 تسجيل دفعة</h4><div style={{ fontSize: 13, color: 'var(--muted)' }}>مفيش دين على العميل دلوقتي. لو عليه فلوس قديمة، {manager ? 'اضغط «إضافة دين» الأول.' : 'المدير يسجلها الأول.'}</div></div>
                             ) : null}
 
-                            {payOpen && detail.balance > 0 && !editMode && !detail.loading ? (
+                            {payOpen && detail.balance > 0 && !editMode && !(detail.loading || detail.err) ? (
                                 <div className="close-card">
                                     <h4>💵 تسجيل دفعة (بتتخصم من الدين)</h4>
                                     <div className="field"><input inputMode="decimal" placeholder="المبلغ" value={payAmt} onChange={(e) => setPayAmt(e.target.value)} /></div>
@@ -840,8 +844,8 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
                                 </div>
                             ) : null}
 
-                            <h4 style={{ color: 'var(--navy)', margin: '14px 0 8px' }}>المعاملات{!detail.loading ? ' (' + detail.ledger.length + ')' : ''}</h4>
-                            {detail.loading ? <div className="empty" style={{ padding: 16 }}>جاري تحميل الحركات…</div> : detail.ledger.length === 0 ? <div className="empty" style={{ padding: 16 }}>مفيش حركات</div> : (() => {
+                            <h4 style={{ color: 'var(--navy)', margin: '14px 0 8px' }}>المعاملات{!(detail.loading || detail.err) ? ' (' + detail.ledger.length + ')' : ''}</h4>
+                            {detail.err ? <div className="empty" style={{ padding: 16 }}>ماقدرناش نحمّل الحركات. الرصيد الظاهر من القايمة.<div style={{ marginTop: 10 }}><button className="btn btn-blue btn-sm" onClick={() => openDetail(detail.customer.id)}>جرّب تاني</button></div></div> : detail.loading ? <div className="empty" style={{ padding: 16 }}>جاري تحميل الحركات…</div> : detail.ledger.length === 0 ? <div className="empty" style={{ padding: 16 }}>مفيش حركات</div> : (() => {
                                 let run = Math.round((detail.balance || 0) * 100) / 100;
                                 return detail.ledger.map((l: any) => {
                                     const after = run;
@@ -884,7 +888,7 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
                                 </>
                             ) : null}
                         </div>
-                        {!editMode && !detail.loading ? (
+                        {!editMode && !(detail.loading || detail.err) ? (
                             <div className="detail-bar">
                                 {manager ? <button className="btn db-debt" onClick={() => { setDebtOpen((v) => !v); setPayOpen(false); document.querySelector('.sheet.tall .sheet-b')?.scrollTo({ top: 0, behavior: 'smooth' }); }}>+ إضافة دين</button> : null}
                                 <button className="btn db-pay" onClick={() => { setPayOpen((v) => !v); setDebtOpen(false); document.querySelector('.sheet.tall .sheet-b')?.scrollTo({ top: 0, behavior: 'smooth' }); }}>تسجيل دفعة</button>
