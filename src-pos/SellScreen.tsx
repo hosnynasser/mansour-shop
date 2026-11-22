@@ -89,6 +89,10 @@ export default function SellScreen({
 
     const count = cart.reduce((s, l) => s + l.qty, 0);
 
+    const togglePick = async () => {
+        setPickOpen((v) => !v);
+        if (customers === null) { try { const r = await api('/api/pos/customers'); setCustomers(r.customers || []); } catch { notify('مشكلة في تحميل العملاء', true); setCustomers([]); } }
+    };
     const pickDebt = async () => {
         setPayment('debt');
         if (customers === null) {
@@ -260,13 +264,13 @@ export default function SellScreen({
                                     <input inputMode="decimal" value={invDisc} onChange={(e) => setInvDisc(e.target.value)} placeholder="0" />
                                 </div>
                                 <div className="field">
-                                    <label>العميل</label>
-                                    <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-                                        <button className="btn btn-navy btn-sm" style={{ flex: 1, minHeight: 46, justifyContent: 'center' }} onClick={async () => {
-                                            setPickOpen((v) => !v);
-                                            if (customers === null) { try { const r = await api('/api/pos/customers'); setCustomers(r.customers || []); } catch { notify('مشكلة في تحميل العملاء', true); setCustomers([]); } }
-                                        }}><Icon n="users" size={18} /> {selCust ? selCust.name : 'اختيار عميل من الموجودين'}</button>
-                                        {custId ? <button className="btn btn-ghost btn-sm" style={{ minHeight: 46 }} onClick={() => { setCustId(0); setPickOpen(false); }}>شيل</button> : null}
+                                    <label>اسم العميل{payment === 'debt' ? '' : ' (اختياري)'}</label>
+                                    <div style={{ position: 'relative', marginBottom: 12 }}>
+                                        <input value={selCust ? selCust.name : payment === 'debt' ? '' : custName} readOnly={!!custId || payment === 'debt'} onChange={(e) => setCustName(e.target.value)} placeholder={payment === 'debt' ? 'اختار عميل من القايمة' : 'اسم العميل'} onClick={() => { if (custId || payment === 'debt') togglePick(); }} style={{ width: '100%', paddingLeft: custId ? 112 : 58 }} />
+                                        <button className="btn btn-navy btn-sm" aria-label="اختيار عميل من الموجودين" title="اختيار عميل من الموجودين" style={{ position: 'absolute', left: 5, top: 5, bottom: 5, width: 46, minHeight: 0, padding: 0, justifyContent: 'center' }} onClick={togglePick}>
+                                            <span style={{ fontSize: 16, lineHeight: 1, display: 'inline-block', transform: pickOpen ? 'rotate(180deg)' : 'none' }}>▾</span>
+                                        </button>
+                                        {custId ? <button className="btn btn-ghost btn-sm" style={{ position: 'absolute', left: 56, top: 5, bottom: 5, minHeight: 0, padding: '0 10px' }} onClick={() => { setCustId(0); setPickOpen(false); }}>شيل</button> : null}
                                     </div>
                                     <label>طريقة الدفع</label>
                                     <div className="pay-toggle">
@@ -280,7 +284,7 @@ export default function SellScreen({
                                             <input placeholder="ابحث عن عميل…" value={custQ} onChange={(e) => setCustQ(e.target.value)} style={{ width: '100%', border: '1.5px solid var(--line)', borderRadius: 10, padding: '9px 12px', margin: '6px 0' }} />
                                             <div style={{ maxHeight: 160, overflowY: 'auto' }}>
                                                 {(customers || []).filter((c) => !custQ.trim() || c.name.toLowerCase().includes(custQ.trim().toLowerCase()) || c.phone.includes(custQ.trim())).slice(0, 20).map((c) => (
-                                                    <button key={c.id} onClick={() => { setCustId(c.id); setPickOpen(false); }} style={{ display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'center', padding: '9px 10px', marginBottom: 4, borderRadius: 10, border: custId === c.id ? '2px solid var(--amber)' : '1.5px solid var(--line)', background: custId === c.id ? '#fff8ea' : '#fff', fontSize: 14 }}>
+                                                    <button key={c.id} onClick={() => { setCustId(c.id); setCustName(''); setPickOpen(false); }} style={{ display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'center', padding: '9px 10px', marginBottom: 4, borderRadius: 10, border: custId === c.id ? '2px solid var(--amber)' : '1.5px solid var(--line)', background: custId === c.id ? '#fff8ea' : '#fff', fontSize: 14 }}>
                                                         <span><b>{c.name}</b>{c.phone ? ' · ' + c.phone : ''}</span>
                                                         {(c.balance || 0) > 0 ? <span style={{ fontSize: 12, color: 'var(--danger)', fontWeight: 700 }}>عليه {fmt(c.balance!)}</span> : null}
                                                     </button>
@@ -297,10 +301,6 @@ export default function SellScreen({
                                 </div>
                                 {payment !== 'debt' ? (
                                     <>
-                                        <div className="field">
-                                            <label>اسم العميل (اختياري)</label>
-                                            <input value={custName} onChange={(e) => setCustName(e.target.value)} placeholder="اسم العميل" />
-                                        </div>
                                         <div className="field">
                                             <label>رقم واتساب العميل (اختياري — لإرسال الفاتورة)</label>
                                             <input inputMode="tel" dir="ltr" style={{ textAlign: 'end' }} value={custPhone} onChange={(e) => setCustPhone(e.target.value)} placeholder="01xxxxxxxxx" />
