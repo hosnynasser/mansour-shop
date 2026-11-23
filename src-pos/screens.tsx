@@ -20,7 +20,7 @@ function MoreSentinel({ shown, total, more }: { shown: number; total: number; mo
     return shown < total ? <div ref={ref} className="empty" style={{ padding: 12 }}>…</div> : null;
 }
 const PAGE_N = 40;
-const STOCK_N = 200;
+const STOCK_N = 40;
 // بحث ذكي: بيتجاهل التشكيل والهمزات والتاء المربوطة والياء، والمسافات، وكل كلمة لازم تتطابق
 const norm = (t: string) => (t || '').toLowerCase().replace(/[\u064B-\u0652\u0640]/g, '').replace(/[أإآٱ]/g, 'ا').replace(/ة/g, 'ه').replace(/[ىئ]/g, 'ي').replace(/ؤ/g, 'و').replace(/\s+/g, ' ').trim();
 const smartMatch = (hay: string, q: string) => { const t = norm(q); if (!t) return true; const h = norm(hay); return t.split(' ').every((w) => h.includes(w)); };
