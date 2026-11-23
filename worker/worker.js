@@ -682,7 +682,7 @@ async function handlePos(request, env, path, ctx) {
         // كل القراءات في دفعة واحدة (رحلة واحدة لقاعدة البيانات بدل 7 ورا بعض)، والنتيجة نفس الأرقام بالظبط
         const rs = await env.POS_DB.batch([
             env.POS_DB.prepare('SELECT id, name, phone, notes, grp FROM customers WHERE id = ?').bind(id),
-            env.POS_DB.prepare('SELECT id, ts, kind, amount, invoice_id, staff, note FROM ledger WHERE customer_id = ? ORDER BY id DESC LIMIT 100').bind(id),
+            env.POS_DB.prepare('SELECT id, ts, kind, amount, invoice_id, staff, note FROM ledger WHERE customer_id = ? ORDER BY ts DESC, id DESC LIMIT 100').bind(id),
             env.POS_DB.prepare("SELECT COALESCE(SUM(CASE WHEN kind = 'charge' THEN amount ELSE -amount END), 0) AS b FROM ledger WHERE customer_id = ?").bind(id),
             env.POS_DB.prepare("SELECT id, num, ts, staff, payment, total, status FROM invoices WHERE customer_id = ? AND status != 'pending' ORDER BY id DESC LIMIT 50").bind(id),
             env.POS_DB.prepare('SELECT ts, delta, kind, invoice_id, note FROM points_log WHERE customer_id = ? ORDER BY id DESC LIMIT 30').bind(id),
@@ -751,6 +751,42 @@ async function handlePos(request, env, path, ctx) {
         const id = parseInt(path.slice('/api/pos/ledger/'.length), 10) || 0;
         await env.POS_DB.prepare("DELETE FROM ledger WHERE id = ? AND (kind = 'payment' OR (kind = 'charge' AND invoice_id IS NULL))").bind(id).run();
         return json({ ok: true });
+    }
+
+    // تعديل قيد دين/دفعة يدوي (مدير فقط): المبلغ والملاحظة والتاريخ. قيود الفواتير مش بتتعدل من هنا.
+    if (path.startsWith('/api/pos/ledger/') && path.endsWith('/edit') && request.method === 'POST') {
+        if (!manager) return json({ error: 'forbidden' }, 403);
+        const id = parseInt(path.slice('/api/pos/ledger/'.length, -'/edit'.length), 10) || 0;
+        let body;
+        try { body = await request.json(); } catch { return json({ error: 'bad_json' }, 400); }
+        const amount = Math.round((Number(body.amount) || 0) * 100) / 100;
+        if (!(amount > 0) || amount > 1e7) return json({ error: 'bad_amount' }, 400);
+        const note = clean(body.note, 200);
+        const row = await env.POS_DB.prepare('SELECT id, customer_id, ts, day, kind, invoice_id FROM ledger WHERE id = ?').bind(id).first();
+        if (!row) return json({ error: 'not_found' }, 404);
+        if (row.invoice_id || (row.kind !== 'payment' && row.kind !== 'charge')) return json({ error: 'not_editable' }, 400);
+        const cairoDay = (d) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+        let ts = row.ts, day = row.day;
+        const wanted = clean(body.date, 10);
+        if (wanted && wanted !== day) {
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(wanted)) return json({ error: 'bad_date' }, 400);
+            const [Y, M, D] = wanted.split('-').map(Number);
+            const chk = new Date(Date.UTC(Y, M - 1, D));
+            if (chk.getUTCFullYear() !== Y || chk.getUTCMonth() !== M - 1 || chk.getUTCDate() !== D || Y < 2000) return json({ error: 'bad_date' }, 400);
+            if (wanted > cairoDay(new Date())) return json({ error: 'future_date' }, 400);
+            // نفس الساعة بتوقيت القاهرة على اليوم الجديد
+            const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Cairo', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(row.ts)).map((p) => [p.type, p.value]));
+            const local = Date.UTC(Y, M - 1, D, Number(parts.hour), Number(parts.minute), Number(parts.second));
+            const offAt = (t) => { const p = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(t)).map((x) => [x.type, x.value])); return Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day), Number(p.hour), Number(p.minute), Number(p.second)) - t; };
+            let t = local - offAt(local);
+            t = local - offAt(t);
+            ts = new Date(t).toISOString();
+            day = wanted;
+        }
+        const r = await env.POS_DB.prepare("UPDATE ledger SET amount = ?, note = ?, ts = ?, day = ? WHERE id = ? AND invoice_id IS NULL AND kind IN ('payment','charge')").bind(amount, note, ts, day, id).run();
+        if (!(r?.meta?.changes > 0)) return json({ error: 'not_found' }, 404);
+        const bal = await env.POS_DB.prepare("SELECT COALESCE(SUM(CASE WHEN kind = 'charge' THEN amount ELSE -amount END), 0) AS b FROM ledger WHERE customer_id = ?").bind(row.customer_id).first();
+        return json({ ok: true, balance: bal?.b ?? 0 });
     }
 
     // ---- التقارير (مدير فقط) ----

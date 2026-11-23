@@ -708,9 +708,33 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
         setBusy(false);
     };
     const delPayment = async (id: number) => {
-        if (!detail || !confirm('تمسح القيد ده؟ هيتعدّل رصيد العميل.')) return;
-        try { await api('/api/pos/ledger/' + id, 'DELETE'); refreshDetail(detail.customer.id); notify('اتمسح القيد ✓'); }
-        catch { notify('مشكلة في المسح', true); }
+        if (!detail || !confirm('تمسح القيد ده؟ هيتعدّل رصيد العميل.')) return false;
+        try { await api('/api/pos/ledger/' + id, 'DELETE'); refreshDetail(detail.customer.id); notify('اتمسح القيد ✓'); return true; }
+        catch { notify('مشكلة في المسح', true); return false; }
+    };
+    const [txSel, setTxSel] = useState<any>(null);
+    const [txEdit, setTxEdit] = useState(false);
+    const [eAmt, setEAmt] = useState('');
+    const [eDate, setEDate] = useState('');
+    const [eNote, setENote] = useState('');
+    const [eBusy, setEBusy] = useState(false);
+    useEffect(() => { if (!detail) { setTxSel(null); setTxEdit(false); } }, [detail]);
+    const closeTx = () => { setTxSel(null); setTxEdit(false); };
+    const saveTx = async () => {
+        if (!txSel || eBusy) return;
+        const amt = Math.round((Number(eAmt) || 0) * 100) / 100;
+        if (!(amt > 0)) { notify('اكتب مبلغ صحيح', true); return; }
+        if (!eDate) { notify('اختار التاريخ', true); return; }
+        if (!confirm('تعدّل القيد؟ المبلغ من ' + fmt(txSel.amount) + ' ج إلى ' + fmt(amt) + ' ج، ورصيد العميل هيتحسب من جديد.')) return;
+        setEBusy(true);
+        try {
+            const orig = (() => { try { return new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(txSel.ts)); } catch { return ''; } })();
+            await api('/api/pos/ledger/' + txSel.id + '/edit', 'POST', { amount: amt, note: eNote.trim(), ...(eDate !== orig ? { date: eDate } : {}) });
+            notify('اتعدّل القيد ✓');
+            closeTx();
+            if (detail) await refreshDetail(detail.customer.id);
+        } catch { notify('مشكلة في التعديل، القيد زي ما هو', true); }
+        setEBusy(false);
     };
 
     const dq = useDeferredValue(q);
@@ -874,7 +898,7 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
                                     const isCharge = l.kind === 'charge';
                                     const label = isCharge ? (l.invoice_id ? 'فاتورة آجل' : 'دين') : 'دفعة';
                                     return (
-                                        <div className="tx-row" key={l.id}>
+                                        <div className="tx-row" key={l.id} role="button" tabIndex={0} style={{ cursor: 'pointer' }} onClick={() => { setTxSel({ ...l, after }); setTxEdit(false); }}>
                                             <span className={'tx-ic ' + (isCharge ? 'up' : 'down')} aria-hidden="true">
                                                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">{isCharge ? <><path d="M12 19V5" /><path d="M6 11l6-6 6 6" /></> : <><path d="M12 5v14" /><path d="M6 13l6 6 6-6" /></>}</svg>
                                             </span>
@@ -886,7 +910,6 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
                                             <div className="tx-amt">
                                                 <b style={{ color: isCharge ? 'var(--danger)' : '#0f7a44' }}>{fmt(l.amount)} ج</b>
                                                 <span>{label}</span>
-                                                {manager && (l.kind === 'payment' || !l.invoice_id) ? <button className="btn btn-danger btn-sm" style={{ padding: '2px 8px', fontSize: 12, marginTop: 2 }} onClick={() => delPayment(l.id)}>×</button> : null}
                                             </div>
                                         </div>
                                     );
@@ -918,6 +941,58 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
                     </div>
                 </>
             ) : null}
+            {txSel && detail ? (() => {
+                const l = txSel; const isCharge = l.kind === 'charge'; const manual = !l.invoice_id;
+                const label = isCharge ? (l.invoice_id ? 'فاتورة آجل' : 'دين') : 'دفعة';
+                const cairoDay = (ts: string) => { try { return new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(ts)); } catch { return ''; } };
+                return (
+                    <>
+                        <div className="sheet-back" style={{ zIndex: 60 }} onClick={closeTx} />
+                        <div className="sheet tall" style={{ zIndex: 61 }}>
+                            <div className="sheet-h">
+                                <button className="btn btn-ghost btn-sm back-chev" aria-label="رجوع" onClick={closeTx}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M9 5l7 7-7 7" /></svg></button>
+                                <h3 className="cd-title">{detail.customer.name}</h3>
+                            </div>
+                            <div className="sheet-b">
+                                {txEdit ? (
+                                    <>
+                                        <h4 className="tx-title">تعديل {label}</h4>
+                                        <div className="field"><label>المبلغ</label><input inputMode="decimal" value={eAmt} onChange={(e) => setEAmt(e.target.value)} /></div>
+                                        <div className="field"><label>التاريخ</label><input type="date" dir="ltr" style={{ textAlign: 'end' }} max={cairoDay(new Date().toISOString())} value={eDate} onChange={(e) => setEDate(e.target.value)} /></div>
+                                        <div className="field"><label>التفاصيل</label><input maxLength={200} value={eNote} onChange={(e) => setENote(e.target.value)} /></div>
+                                        <div style={{ fontSize: 12, color: 'var(--muted)' }}>تغيير التاريخ بينقل القيد لليوم الجديد في التقارير كمان.</div>
+                                    </>
+                                ) : (
+                                    <>
+                                        <div className="tx-d" style={{ fontSize: 17, marginTop: 6 }}>{fmtTx(l.ts)}</div>
+                                        <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 14 }}>{label}</div>
+                                        <div style={{ fontSize: 40, fontWeight: 800, color: isCharge ? 'var(--danger)' : '#0f7a44', lineHeight: 1.2 }}>{fmt(l.amount)} ج</div>
+                                        <div className="tx-b" style={{ display: 'inline-block', marginTop: 8, padding: '3px 10px', borderRadius: 8, background: l.after > 0 ? '#fdeaea' : '#e7f6ec', color: l.after > 0 ? 'var(--danger)' : '#0f7a44' }}>الرصيد بعدها {fmt(Math.abs(l.after))} ج{l.after < 0 ? ' (له)' : ''}</div>
+                                        {l.note ? <><h4 className="tx-title" style={{ marginTop: 22 }}>التفاصيل</h4><div style={{ color: 'var(--muted)' }}>{l.note}</div></> : null}
+                                        {l.staff ? <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 14 }}>سجّلها: {l.staff}</div> : null}
+                                        {!manual ? <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 18 }}>القيد ده مرتبط بفاتورة، تعديله من الفاتورة نفسها.</div> : null}
+                                    </>
+                                )}
+                            </div>
+                            {manager && manual ? (
+                                <div className="detail-bar">
+                                    {txEdit ? (
+                                        <>
+                                            <button className="btn db-pay" disabled={eBusy} onClick={saveTx}>حفظ</button>
+                                            <button className="btn db-debt" disabled={eBusy} onClick={() => setTxEdit(false)}>إلغاء</button>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <button className="btn" style={{ background: '#e3f0ff', color: 'var(--blue)' }} onClick={() => { setEAmt(String(l.amount)); setEDate(cairoDay(l.ts)); setENote(l.note || ''); setTxEdit(true); }}>تعديل</button>
+                                            <button className="btn db-debt" onClick={async () => { if (await delPayment(l.id)) closeTx(); }}>حذف</button>
+                                        </>
+                                    )}
+                                </div>
+                            ) : null}
+                        </div>
+                    </>
+                );
+            })() : null}
         </>
     );
 }
