@@ -594,6 +594,9 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
     const [editMode, setEditMode] = useState(false);
     const [mode, setMode] = useState<'cust' | 'sup'>('cust');
     const [grpSel, setGrpSel] = useState('');
+    const [grpOpen, setGrpOpen] = useState(false);
+    const [setOpen, setSetOpen] = useState(false);
+    useEffect(() => { if (!detail) setSetOpen(false); }, [detail]);
     const [grp, setGrp] = useState('');
 
     const [shown, setShown] = useState(1e6);
@@ -732,13 +735,20 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
                     <span className="si"><Icon n="search" size={18} /></span>
                     <input placeholder="ابحث بالاسم أو التليفون أو المجموعة…" value={q} onChange={(e) => setQ(e.target.value)} style={{ fontSize: 16 }} />
                 </div>
-                {groups.length > 0 ? (
-                    <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingTop: 6, WebkitOverflowScrolling: 'touch' }}>
-                        {[['', 'الكل'], ...groups.map((g) => [g, g]), ['__none', 'بدون مجموعة']].map(([v, l]) => (
-                            <button key={v || 'all'} className={'btn btn-sm ' + (grpSel === v ? 'btn-navy' : 'btn-ghost')} style={{ flex: '0 0 auto', padding: '4px 12px', minHeight: 32 }} onClick={() => setGrpSel(v)}>{l}</button>
-                        ))}
-                    </div>
-                ) : null}
+                <div style={{ position: 'relative', paddingTop: 6 }}>
+                    <button className="btn btn-ghost btn-block" style={{ justifyContent: 'space-between', minHeight: 40 }} aria-expanded={grpOpen} onClick={() => setGrpOpen((v) => !v)}>
+                        <span>المجموعة: <b>{grpSel === '' ? 'الكل' : grpSel === '__none' ? 'بدون مجموعة' : grpSel}</b></span>
+                        <span style={{ display: 'inline-block', transform: grpOpen ? 'rotate(180deg)' : 'none' }}>▾</span>
+                    </button>
+                    {grpOpen ? (
+                        <div style={{ position: 'absolute', insetInline: 0, top: 50, zIndex: 20, background: '#fff', border: '1.5px solid var(--line)', borderRadius: 12, boxShadow: '0 8px 24px rgba(0,0,0,.15)', maxHeight: 280, overflowY: 'auto' }}>
+                            {[['', 'الكل'], ...groups.map((g) => [g, g]), ['__none', 'بدون مجموعة']].map(([v, l]) => (
+                                <button key={v || 'all'} style={{ display: 'block', width: '100%', textAlign: 'start', padding: '12px 14px', border: 0, borderBottom: '1px solid var(--line)', background: grpSel === v ? '#fff8ea' : '#fff', fontWeight: grpSel === v ? 800 : 600, fontSize: 15, color: 'var(--navy)' }} onClick={() => { setGrpSel(v); setGrpOpen(false); }}>{l}</button>
+                            ))}
+                            {groups.length === 0 ? <div style={{ padding: '10px 14px', fontSize: 13, color: 'var(--muted)' }}>مفيش مجموعات لسه. افتح عميل واكتب مجموعته.</div> : null}
+                        </div>
+                    ) : null}
+                </div>
             </div>
             {loading ? <div className="empty">جاري التحميل…</div> : filtered.length === 0 ? <div className="empty">{list.length === 0 ? 'مفيش عملاء لسه — ضيف أول عميل' : 'مفيش نتايج للبحث'}</div> : filtered.slice(0, shown).map((c) => (
                 <button key={c.id} className="inv-row" style={{ width: '100%', textAlign: 'start', padding: '8px 12px', marginBottom: 6 }} onPointerDown={() => prefetch(c.id)} onClick={() => openDetail(c.id)}>
@@ -777,16 +787,20 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
                     <div className="sheet-back" onClick={() => setDetail(null)} />
                     <div className="sheet tall">
                         <div className="sheet-h">
-                            {manager && !editMode && !(detail.loading || detail.err) ? (
-                                <>
-                                    <button className="btn btn-ghost btn-sm" onClick={() => setEditMode(true)}>تعديل</button>
-                                    <button className="btn btn-danger btn-sm" onClick={del}>مسح</button>
-                                </>
-                            ) : null}
                             <h3>{detail.customer.name}</h3>
-                            <button className="btn btn-ghost btn-sm" style={{ marginInlineStart: 'auto' }} onClick={() => setDetail(null)}>قفل</button>
+                            {manager && !editMode && !(detail.loading || detail.err) ? (
+                                <button className="btn btn-ghost btn-sm" style={{ marginInlineStart: 'auto' }} aria-expanded={setOpen} onClick={() => setSetOpen((v) => !v)}>⚙️ إعدادات</button>
+                            ) : (
+                                <button className="btn btn-ghost btn-sm" style={{ marginInlineStart: 'auto' }} onClick={() => setDetail(null)}>قفل</button>
+                            )}
                         </div>
                         <div className="sheet-b">
+                            {setOpen && manager && !editMode ? (
+                                <div className="close-card" style={{ display: 'grid', gap: 8, marginBottom: 10 }}>
+                                    <button className="btn btn-ghost btn-block" onClick={() => { setSetOpen(false); setEditMode(true); }}>✏️ تعديل بيانات العميل</button>
+                                    <button className="btn btn-danger btn-block" onClick={() => { setSetOpen(false); del(); }}>🗑 مسح العميل</button>
+                                </div>
+                            ) : null}
                             {editMode ? (
                                 <>
                                     <div className="field"><label>الاسم</label><input value={detail.customer.name} onChange={(e) => setDetail({ ...detail, customer: { ...detail.customer, name: e.target.value } })} /></div>
