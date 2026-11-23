@@ -792,12 +792,13 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
                 <button className="btn btn-ghost" aria-label="إعدادات القسم" aria-expanded={secOpen} style={{ flex: 'none', minWidth: 46, fontSize: 20, padding: '0 10px' }} onClick={() => setSecOpen(true)}>⚙️</button>
             </div>
             {mode === 'sup' && manager ? <SuppliersPane notify={notify} reloadKey={grpBump} /> : (<>
-            <div className="close-card" style={{ display: 'flex', padding: '2px 4px', marginBottom: 8 }}>
+            <div className="close-card" style={{ display: 'flex', padding: '2px 4px', marginBottom: 8, position: 'relative' }}>
+                {cst === 'loading' && !loading ? <span className="spin-dot" role="status" aria-label="بيتحدّث" title="بيتحدّث" /> : null}
                 <Sum l="ليا (على العملاء)" v={fmt(totalDebt) + ' ج'} c="var(--danger)" />
                 <Sum l="عليا (رصيد للعملاء)" v={fmt(totalCredit) + ' ج'} c="var(--ok)" />
                 <Sum l={net >= 0 ? 'الصافي (ليا)' : 'الصافي (عليا)'} v={fmt(Math.abs(net)) + ' ج'} />
             </div>
-            {cst === 'loading' && !loading ? <div style={{ fontSize: 12, color: 'var(--muted)', textAlign: 'center', margin: '-2px 0 6px' }}>بيتحدّث… الأرقام دي من آخر مرة</div> : cst === 'err' ? <div style={{ fontSize: 12, color: 'var(--danger)', textAlign: 'center', margin: '-2px 0 6px' }}>فشل التحديث، الأرقام دي من آخر مرة ومش محدّثة</div> : null}
+            {cst === 'err' ? <div style={{ fontSize: 12, color: 'var(--danger)', textAlign: 'center', margin: '-2px 0 6px' }}>فشل التحديث، الأرقام دي من آخر مرة ومش محدّثة</div> : null}
             <div className="search-wrap" style={{ top: 0 }}>
                 <div className="search-box" style={{ padding: '7px 12px' }}>
                     <button className="grp-btn" aria-expanded={grpOpen} onClick={() => setGrpOpen((v) => !v)}><span>{grpSel === '' ? 'المجموعة' : grpSel === '__none' ? 'بدون مجموعة' : grpSel}</span><span style={{ display: 'inline-block', transform: grpOpen ? 'rotate(180deg)' : 'none' }}>▾</span></button>
