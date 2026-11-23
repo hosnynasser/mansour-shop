@@ -69,7 +69,7 @@ export default function SharePdf({ inv, items, logo, notify }: { inv: Invoice; i
     return (
         <>
             <button className="btn btn-wa btn-block" disabled={busy} onClick={share}>
-                {busy ? '⏳ جاري تجهيز الـ PDF…' : '📄 إرسال PDF على واتساب'}
+                {busy ? '⏳ جاري تجهيز الـ PDF…' : 'إرسال PDF على واتساب'}
             </button>
             {rendering ? createPortal(
                 <div ref={hostRef} style={{ position: 'fixed', top: 0, left: -10000, zIndex: -1, pointerEvents: 'none' }} aria-hidden="true">

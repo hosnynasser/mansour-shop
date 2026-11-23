@@ -105,11 +105,12 @@ export function InvoicesScreen({ staff, openInvoice, openQuote, notify, initialV
                 {manager ? <button className="btn btn-ghost" aria-label="إعدادات الفواتير" style={{ flex: 'none', minWidth: 46, padding: '0 10px', fontSize: 20 }} onClick={() => setSettingsOpen(true)}>⚙️</button> : null}
             </div>
             {view !== 'quotes' ? <>
-                <div className="search-box" style={{ display: 'flex', alignItems: 'center', minWidth: 0, marginBottom: 10 }}>
+                <div style={{ position: 'relative', marginBottom: 10 }}>
+                <div className="search-box" style={{ display: 'flex', alignItems: 'center', minWidth: 0 }}>
                     <button className="btn btn-ghost" aria-expanded={filtersOpen} style={{ flex: 'none', padding: '9px 10px' }} onClick={() => setFiltersOpen((v) => !v)}>التصنيفات ▾</button>
                     <input aria-label="بحث الفواتير" placeholder="رقم الفاتورة، العميل أو الموظف…" value={search} onChange={(e) => setSearch(e.target.value)} style={{ flex: 1, minWidth: 0, width: 0, border: 0, background: 'transparent', padding: '12px 6px', fontSize: 15 }} />
                 </div>
-                {filtersOpen ? <div className="inv-filter-menu" style={{ marginBottom: 10 }}>
+                {filtersOpen ? <div className="inv-filter-menu">
                     <button className={view === 'mine' ? 'on' : ''} onClick={() => { setView('mine'); setFiltersOpen(false); }}>فواتيري</button>
                     {manager ? <button className={view === 'all' ? 'on' : ''} onClick={() => { setView('all'); setFiltersOpen(false); }}>كل الموظفين</button> : null}
                     <div style={{ borderTop: '1px solid var(--line)', marginTop: 6, paddingTop: 6 }}>
@@ -118,6 +119,7 @@ export function InvoicesScreen({ staff, openInvoice, openQuote, notify, initialV
                         {cats.map((c) => <button key={c.id} onClick={() => { setCategory(String(c.id)); setFiltersOpen(false); }}>{c.name}</button>)}
                     </div>
                 </div> : null}
+                </div>
                 {(category || view === 'all') ? <div style={{ fontSize: 12, color: 'var(--muted)', margin: '-3px 0 8px' }}>{view === 'all' ? 'كل الموظفين' : 'فواتيري'} · {category === 'none' ? 'بدون تصنيف' : cats.find((c) => String(c.id) === category)?.name || 'كل التصنيفات'}</div> : null}
             </> : null}
             {settingsOpen && manager ? <>
