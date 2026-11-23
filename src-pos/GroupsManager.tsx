@@ -1,12 +1,21 @@
 import { useEffect, useState } from 'react';
-import { api } from './lib';
+import { api, cget, cred, csetIf } from './lib';
 
 type G = { name: string; count: number };
 
 // إدارة مجموعات العملاء أو الموردين: إضافة، تعديل الاسم، حذف المجموعة.
 // حذف المجموعة بيشيلها من أعضائها بس (بيبقوا "بدون مجموعة")، العملاء/الموردين وأرصدتهم وقيودهم ما بتتلمسش.
-export default function GroupsManager({ section, manager, onChanged, notify }: { section: 'customers' | 'suppliers'; manager: boolean; onChanged: () => void; notify: (m: string, b?: boolean) => void }) {
-    const [list, setList] = useState<G[] | null>(null);
+// قايمة أولية من الشاشة الأم (أسماء المجموعات وعدد الأعضاء من القايمة المحمّلة عندها)
+export function seedGroups(items: { grp?: string | null }[], defs: string[]): G[] {
+    const m = new Map<string, number>();
+    items.forEach((x) => { const n = (x.grp || '').trim(); if (n) m.set(n, (m.get(n) || 0) + 1); });
+    defs.forEach((d) => { if (!m.has(d)) m.set(d, 0); });
+    return Array.from(m.entries()).map(([name, count]) => ({ name, count })).sort((a, b) => (a.name < b.name ? -1 : 1));
+}
+export default function GroupsManager({ section, manager, onChanged, notify, seed }: { section: 'customers' | 'suppliers'; manager: boolean; onChanged: () => void; notify: (m: string, b?: boolean) => void; seed?: G[] }) {
+    // آخر قايمة محفوظة (أو القايمة الأولية من الشاشة) بتظهر فوراً وبعلامة "محفوظة"، والتعديل والمسح مقفولين لحد ما الرد الجديد يوصل
+    const [list, setList] = useState<G[] | null>(() => cget<G[]>('grps_' + section) || (seed && seed.length ? seed : null));
+    const [fresh, setFresh] = useState(false);
     const [err, setErr] = useState(false);
     const [nw, setNw] = useState('');
     const [edit, setEdit] = useState<string | null>(null);
@@ -15,9 +24,10 @@ export default function GroupsManager({ section, manager, onChanged, notify }: {
     const word = section === 'suppliers' ? 'مورد' : 'عميل';
 
     const load = async () => {
-        try { const r = await api('/api/pos/groups?section=' + section); setList(r.groups || []); setErr(false); } catch { setErr(true); }
+        const c0 = cred();
+        try { const r = await api('/api/pos/groups?section=' + section); setList(r.groups || []); csetIf('grps_' + section, r.groups || [], c0); setFresh(true); setErr(false); } catch { setFresh(false); setErr(true); }
     };
-    useEffect(() => { setList(null); setEdit(null); setNw(''); load(); }, [section]);
+    useEffect(() => { setList(cget<G[]>('grps_' + section) || (seed && seed.length ? seed : null)); setFresh(false); setEdit(null); setNw(''); load(); }, [section]);
 
     const errMsg = (e: any) => {
         const c = e?.data?.error;
@@ -58,6 +68,9 @@ export default function GroupsManager({ section, manager, onChanged, notify }: {
                     <button className="btn btn-navy btn-sm" disabled={busy || !nw.trim()} onClick={add}>إضافة</button>
                 </div>
             ) : <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 10 }}>إدارة المجموعات للمدير بس.</div>}
+            {list && !fresh ? (err
+                ? <div style={{ fontSize: 12, color: 'var(--danger)', margin: '0 0 8px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>فشل التحديث، القايمة دي من آخر مرة ومش محدّثة<button className="btn btn-blue btn-sm" onClick={() => load()}>جرّب تاني</button></div>
+                : <div role="status" style={{ fontSize: 12, color: 'var(--muted)', margin: '0 0 8px', display: 'flex', alignItems: 'center', gap: 6 }}><span className="spin-inl" />محفوظة · بيتحدّث</div>) : null}
             {err && !list ? <div className="empty" style={{ padding: 16 }}>مقدرتش أحمّل المجموعات. <button className="btn btn-ghost btn-sm" onClick={load}>جرّب تاني</button></div> : null}
             {!err && !list ? <div className="empty" style={{ padding: 16 }}>جاري التحميل…</div> : null}
             {list && list.length === 0 ? <div className="empty" style={{ padding: 16 }}>مفيش مجموعات لسه.</div> : null}
@@ -77,8 +90,8 @@ export default function GroupsManager({ section, manager, onChanged, notify }: {
                             </div>
                             {manager ? (
                                 <>
-                                    <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => { setEdit(g.name); setVal(g.name); }}>تعديل</button>
-                                    <button className="btn btn-ghost btn-sm" style={{ color: 'var(--danger)' }} disabled={busy} onClick={() => del(g)}>مسح</button>
+                                    <button className="btn btn-ghost btn-sm" disabled={busy || !fresh} onClick={() => { setEdit(g.name); setVal(g.name); }}>تعديل</button>
+                                    <button className="btn btn-ghost btn-sm" style={{ color: 'var(--danger)' }} disabled={busy || !fresh} onClick={() => del(g)}>مسح</button>
                                 </>
                             ) : null}
                         </>

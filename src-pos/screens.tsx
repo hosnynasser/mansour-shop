@@ -7,7 +7,7 @@ import ScannerModal from './ScannerModal';
 import { ExportCard, ProfitView } from './ReportsExtra';
 import { Loyalty } from './LoyaltyUI';
 import { NewSupplierSheet, SupplierSheet } from './PurchasesScreen';
-import GroupsManager from './GroupsManager';
+import GroupsManager, { seedGroups } from './GroupsManager';
 
 // تحميل تدريجي: بيعرض أول 40 وبيزود لما المستخدم ينزل
 function MoreSentinel({ shown, total, more }: { shown: number; total: number; more: () => void }) {
@@ -113,7 +113,7 @@ export function InvoicesScreen({ staff, openInvoice, openQuote, notify, initialV
 }
 
 // ---------- تبويب الموردين (نفس بيانات المشتريات الحالية، عرض بس) ----------
-function SuppliersPane({ notify, reloadKey }: { notify: (m: string, b?: boolean) => void; reloadKey?: number }) {
+function SuppliersPane({ notify, reloadKey, onSeed }: { notify: (m: string, b?: boolean) => void; reloadKey?: number; onSeed?: (g: { name: string; count: number }[]) => void }) {
     const [list, setList] = useState<any[] | null>(() => cget<any[]>('suppliers'));
     const [fst, setFst] = useState<'loading' | 'ok' | 'err'>('loading');
     const [q, setQ] = useState('');
@@ -146,6 +146,7 @@ function SuppliersPane({ notify, reloadKey }: { notify: (m: string, b?: boolean)
         }
     };
     const all = list || [];
+    useEffect(() => { if (onSeed && list) onSeed(seedGroups(list, defGroups)); }, [list, defGroups]);
     const groups = useMemo(() => Array.from(new Set([...all.map((x) => (x.grp || '').trim()), ...defGroups].filter(Boolean))).sort() as string[], [list, defGroups]);
     useEffect(() => { if (grpSel && grpSel !== '__none' && !groups.includes(grpSel)) setGrpSel(''); }, [groups, grpSel]);
     const rows = all.filter((x) => (!grpSel || (grpSel === '__none' ? !(x.grp || '').trim() : (x.grp || '').trim() === grpSel)) && smartMatch(x.name + ' ' + (x.phone || '') + ' ' + (x.grp || ''), q));
@@ -653,6 +654,7 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
     const [setOpen, setSetOpen] = useState(false);
     const [secOpen, setSecOpen] = useState(false);
     const [grpBump, setGrpBump] = useState(0);
+    const [supSeed, setSupSeed] = useState<{ name: string; count: number }[]>([]);
     const [defGroups, setDefGroups] = useState<string[]>([]);
     const loadDefs = async () => { try { const r = await api('/api/pos/groups?section=customers'); setDefGroups((r.groups || []).map((g: any) => g.name)); } catch { /* بنكمل بمجموعات الأعضاء */ } };
     useEffect(() => { loadDefs(); }, []);
@@ -820,7 +822,7 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
             </div>
                 <button className="btn btn-ghost" aria-label="إعدادات القسم" aria-expanded={secOpen} style={{ flex: 'none', minWidth: 46, fontSize: 20, padding: '0 10px' }} onClick={() => setSecOpen(true)}>⚙️</button>
             </div>
-            {mode === 'sup' && manager ? <SuppliersPane notify={notify} reloadKey={grpBump} /> : (<>
+            {mode === 'sup' && manager ? <SuppliersPane notify={notify} reloadKey={grpBump} onSeed={setSupSeed} /> : (<>
             <div className="close-card" style={{ display: 'flex', padding: '2px 4px', marginBottom: 8, position: 'relative' }}>
                 {cst === 'loading' && !loading ? <span className="spin-dot" role="status" aria-label="بيتحدّث" title="بيتحدّث" /> : null}
                 <Sum l="ليا (على العملاء)" v={fmt(totalDebt) + ' ج'} c="var(--danger)" />
@@ -1010,7 +1012,7 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
                     <div className="sheet-back" onClick={() => setSecOpen(false)} />
                     <div className="sheet">
                         <div className="sheet-h"><h3>{mode === 'sup' ? 'إعدادات الموردين' : 'إعدادات العملاء'}</h3><button className="btn btn-ghost btn-sm" style={{ marginInlineStart: 'auto' }} onClick={() => setSecOpen(false)}>قفل</button></div>
-                        <div className="sheet-b"><GroupsManager section={mode === 'sup' ? 'suppliers' : 'customers'} manager={manager} notify={notify} onChanged={() => { setGrpBump((n) => n + 1); load(); loadDefs(); }} /></div>
+                        <div className="sheet-b"><GroupsManager section={mode === 'sup' ? 'suppliers' : 'customers'} seed={mode === 'sup' ? supSeed : seedGroups(list, defGroups)} manager={manager} notify={notify} onChanged={() => { setGrpBump((n) => n + 1); load(); loadDefs(); }} /></div>
                     </div>
                 </>
             ) : null}

@@ -815,7 +815,8 @@ async function handlePos(request, env, path, ctx) {
     // حذف/تعديل مجموعة بيلمس عمود grp بس: الأرصدة والقيود والفواتير ما بتتغيرش أبداً.
     if (path.startsWith('/api/pos/groups')) {
         const GT = { customers: 'customers', suppliers: 'suppliers' };
-        await env.POS_DB.prepare('CREATE TABLE IF NOT EXISTS grp_defs (section TEXT NOT NULL, name TEXT NOT NULL, PRIMARY KEY (section, name))').run();
+        // مرة واحدة لكل تشغيل بدل رحلة قاعدة بيانات في كل طلب (الجدول موجود بعد أول مرة)
+        if (!globalThis.__grpDefsReady) { await env.POS_DB.prepare('CREATE TABLE IF NOT EXISTS grp_defs (section TEXT NOT NULL, name TEXT NOT NULL, PRIMARY KEY (section, name))').run(); globalThis.__grpDefsReady = true; }
         const gname = (v) => (typeof v === 'string' ? v.trim().slice(0, 40) : '');
         const memberCount = async (tbl, name) => (await env.POS_DB.prepare('SELECT COUNT(*) AS n FROM ' + tbl + ' WHERE TRIM(grp) = ?').bind(name).first())?.n || 0;
         const exists = async (section, tbl, name) => {
