@@ -281,11 +281,11 @@ export function StockScreen({ staff, products, categories, refresh, notify }: { 
     return (
         <>
             <div className="search-wrap" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <div className="search-box" style={{ flex: 1 }}>
+                <div className="search-box" style={{ flex: 1, minWidth: 0 }}>
                     <span className="si"><Icon n="search" size={20} /></span>
-                    <input placeholder="ابحث بالاسم أو الكود…" value={q} onChange={(e) => setQ(e.target.value)} />
+                    <input style={{ minWidth: 0, width: "100%" }} placeholder="ابحث بالاسم أو الكود…" value={q} onChange={(e) => setQ(e.target.value)} />
                 </div>
-                {manager ? <button className="btn btn-ghost btn-sm" style={{ minHeight: 46, flex: '0 0 auto', marginInlineEnd: 12, display: 'flex', alignItems: 'center', gap: 6 }} onClick={() => setStOpen(true)} title="إعدادات المخزون"><Icon n="settings" size={20} /> الإعدادات</button> : null}
+                {manager ? <button className="btn btn-ghost btn-sm" style={{ minHeight: 46, flex: '0 0 auto', display: 'flex', alignItems: 'center', gap: 6 }} onClick={() => setStOpen(true)} title="إعدادات المخزون"><Icon n="settings" size={20} /> الإعدادات</button> : null}
             </div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
                 <CatChips categories={categories} sel={catSel} setSel={(c) => { setCatSel(c); setLowOnly(false); }} products={products} />
