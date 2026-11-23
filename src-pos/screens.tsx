@@ -143,12 +143,13 @@ function SuppliersPane({ notify, reloadKey }: { notify: (m: string, b?: boolean)
     );
     return (
         <>
-            <div className="close-card" style={{ display: 'flex', padding: '2px 4px', marginBottom: 8 }}>
+            <div className="close-card" style={{ display: 'flex', padding: '2px 4px', marginBottom: 8, position: 'relative' }}>
+                {fst === 'loading' ? <span className="spin-dot" role="status" aria-label="بيتحدّث" title="بيتحدّث" /> : null}
                 <Cell l="ليا (عند الموردين)" v={fmt(mine) + ' ج'} c="var(--ok)" />
                 <Cell l="عليا (للموردين)" v={fmt(owed) + ' ج'} c="var(--danger)" />
                 <Cell l={net >= 0 ? 'الصافي (ليا)' : 'الصافي (عليا)'} v={fmt(Math.abs(net)) + ' ج'} />
             </div>
-            {fst === 'loading' ? <div style={{ fontSize: 12, color: 'var(--muted)', textAlign: 'center', margin: '-2px 0 6px' }}>بيتحدّث… الأرقام دي من آخر مرة</div> : fst === 'err' ? <div style={{ fontSize: 12, color: 'var(--danger)', textAlign: 'center', margin: '-2px 0 6px' }}>فشل التحديث، الأرقام دي من آخر مرة ومش محدّثة</div> : null}
+            {fst === 'err' ? <div style={{ fontSize: 12, color: 'var(--danger)', textAlign: 'center', margin: '-2px 0 6px' }}>فشل التحديث، الأرقام دي من آخر مرة ومش محدّثة</div> : null}
             <div className="search-wrap" style={{ top: 0 }}>
                 <div className="search-box" style={{ padding: '7px 12px' }}>
                     <button className="grp-btn" aria-expanded={grpOpen} onClick={() => setGrpOpen((v) => !v)}><span>{grpSel === '' ? 'المجموعة' : grpSel === '__none' ? 'بدون مجموعة' : grpSel}</span><span style={{ display: 'inline-block', transform: grpOpen ? 'rotate(180deg)' : 'none' }}>▾</span></button>
