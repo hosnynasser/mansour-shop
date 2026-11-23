@@ -220,7 +220,7 @@ export function SupplierSheet({ data, onClose, onChanged, onReload, notify, grou
         if (!confirm('تعدّل الدفعة؟ المبلغ من ' + fmt(txSel.p.amount) + ' ج إلى ' + fmt(amt) + ' ج، ورصيد المورد هيتعدّل بالفرق.')) return;
         setEBusy(true);
         try {
-            await api('/api/pos/supplier-payment/' + txSel.id + '/edit', 'POST', { expected: txSel.p.amount, amount: amt, note: eNote.trim(), ...(eDate !== cairoDayOf(txSel.ts) ? { date: eDate } : {}) });
+            await api('/api/pos/supplier-payment/' + txSel.id + '/edit', 'POST', { expected: txSel.p.amount, expectedTs: txSel.p.ts, expectedNote: txSel.p.note || '', amount: amt, note: eNote.trim(), ...(eDate !== cairoDayOf(txSel.ts) ? { date: eDate } : {}) });
             notify('اتعدّلت الدفعة ✓');
             closeTx();
             await reload();
@@ -232,7 +232,7 @@ export function SupplierSheet({ data, onClose, onChanged, onReload, notify, grou
         if (!confirm('تمسح الدفعة دي؟ المبلغ هيرجع على رصيد المورد.')) return;
         setEBusy(true);
         try {
-            await api('/api/pos/supplier-payment/' + txSel.id + '/delete', 'POST', { expected: txSel.p.amount });
+            await api('/api/pos/supplier-payment/' + txSel.id + '/delete', 'POST', { expected: txSel.p.amount, expectedTs: txSel.p.ts, expectedNote: txSel.p.note || '' });
             notify('اتمسحت الدفعة ✓');
             closeTx();
             await reload();
@@ -248,12 +248,23 @@ export function SupplierSheet({ data, onClose, onChanged, onReload, notify, grou
         let cutoff = '';
         if (purchases.length >= 50) cutoff = purchases.reduce((m, p) => (m === '' || p.ts < m ? p.ts : m), '');
         if (payments.length >= 100) { const pc = payments.reduce((m: string, p: any) => (m === '' || p.ts < m ? p.ts : m), ''); if (pc > cutoff) cutoff = pc; }
-        const list = all.filter((x) => !cutoff || x.ts >= cutoff);
+        // حركات بنفس وقت حد القص ممكن تكون ناقصة، فبنعرض الأحدث منه بس
+        const list = all.filter((x) => !cutoff || x.ts > cutoff);
         list.sort((a, b) => (a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : a.type !== b.type ? (a.type === 'payment' ? -1 : 1) : b.id - a.id));
+        // الرصيد بعد الحركة = الرصيد الحالي ناقص أثر الحركات الأحدث. مش بنعرضه لو فيه صرف شيك أحدث (أثره الفعلي مش مسجّل) أو حركة بنفس الوقت بالظبط (الترتيب مش مؤكد).
         let run = Math.round((s.balance || 0) * 100) / 100;
-        return list.map((x) => { const after = run; run = Math.round((run - x.effect) * 100) / 100; return { ...x, after }; });
+        let chequeNewer = false;
+        return list.map((x, i) => {
+            const tied = (i > 0 && list[i - 1].ts === x.ts) || (i < list.length - 1 && list[i + 1].ts === x.ts);
+            const why = chequeNewer ? 'cheque' : tied ? 'tie' : '';
+            const out = { ...x, after: why ? null : run, why };
+            run = Math.round((run - x.effect) * 100) / 100;
+            if (x.type === 'payment' && /^صرف شيك/.test(x.p.note || '')) chequeNewer = true;
+            return out;
+        });
     })();
-    const hasCheque = payments.some((p: any) => /^صرف شيك/.test(p.note || ''));
+    const hasHidden = rows.some((x: any) => x.after === null);
+    const whyTxt = (w: string) => (w === 'cheque' ? 'غير متاح: فيه صرف شيك بعد الحركة دي، ومبلغه الفعلي على الرصيد مش مسجّل' : 'غير متاح: فيه حركة تانية بنفس الوقت بالظبط والترتيب مش مؤكد');
     const Arrow = ({ up }: { up: boolean }) => (
         <span className={'tx-ic ' + (up ? 'up' : 'down')} aria-hidden="true">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">{up ? <><path d="M12 19V5" /><path d="M6 11l6-6 6 6" /></> : <><path d="M12 5v14" /><path d="M6 13l6 6 6-6" /></>}</svg>
@@ -305,7 +316,7 @@ export function SupplierSheet({ data, onClose, onChanged, onReload, notify, grou
                                 <Arrow up={isP} />
                                 <div className="tx-mid">
                                     <div className="tx-d">{fmtTxS(x.ts)}</div>
-                                    <div className="tx-b" style={{ color: x.after > 0 ? 'var(--danger)' : '#0f7a44' }}>الرصيد بعدها {fmt(Math.abs(x.after))} ج{x.after < 0 ? ' (ليك)' : ''}</div>
+                                    {x.after === null ? <div className="tx-b" style={{ color: 'var(--muted)' }}>الرصيد بعدها: غير متاح</div> : <div className="tx-b" style={{ color: x.after > 0 ? 'var(--danger)' : '#0f7a44' }}>الرصيد بعدها {fmt(Math.abs(x.after))} ج{x.after < 0 ? ' (ليك)' : ''}</div>}
                                     <div className="tx-n">{isP ? x.p.num : (x.p.note || '')}{!isP && x.p.staff ? (x.p.note ? ' · ' : '') + x.p.staff : ''}</div>
                                 </div>
                                 <div className="tx-amt">
@@ -315,7 +326,7 @@ export function SupplierSheet({ data, onClose, onChanged, onReload, notify, grou
                             </div>
                         );
                     })}
-                    {hasCheque ? <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 8 }}>فيه دفعات صرف شيك، فالرصيد بعد الحركات القديمة تقريبي.</div> : null}
+                    {hasHidden ? <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 8 }}>الرصيد بعد بعض الحركات مش معروض لأنه مش مضمون (صرف شيك بعدها أو حركتين بنفس الوقت). الرصيد الحالي والمبالغ مظبوطين.</div> : null}
                 </div>
                 {owe ? (
                     <div className="detail-bar">
@@ -345,7 +356,7 @@ export function SupplierSheet({ data, onClose, onChanged, onReload, notify, grou
                                     <div className="tx-d" style={{ fontSize: 17, marginTop: 6 }}>{fmtTxS(tx.ts)}</div>
                                     <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 14 }}>{tx.type === 'purchase' ? 'فاتورة شراء ' + tx.p.num : 'دفعة للمورد'}</div>
                                     <div style={{ fontSize: 40, fontWeight: 800, color: tx.type === 'purchase' ? 'var(--danger)' : '#0f7a44', lineHeight: 1.2 }}>{fmt(tx.type === 'purchase' ? tx.p.total : tx.p.amount)} ج</div>
-                                    <div className="tx-b" style={{ display: 'inline-block', marginTop: 8, padding: '3px 10px', borderRadius: 8, background: tx.after > 0 ? '#fdeaea' : '#e7f6ec', color: tx.after > 0 ? 'var(--danger)' : '#0f7a44' }}>الرصيد بعدها {fmt(Math.abs(tx.after))} ج{tx.after < 0 ? ' (ليك)' : ''}</div>
+                                    {tx.after === null ? <div style={{ marginTop: 8, fontSize: 13, color: 'var(--muted)' }}>الرصيد بعدها {whyTxt(tx.why)}</div> : <div className="tx-b" style={{ display: 'inline-block', marginTop: 8, padding: '3px 10px', borderRadius: 8, background: tx.after > 0 ? '#fdeaea' : '#e7f6ec', color: tx.after > 0 ? 'var(--danger)' : '#0f7a44' }}>الرصيد بعدها {fmt(Math.abs(tx.after))} ج{tx.after < 0 ? ' (ليك)' : ''}</div>}
                                     {tx.type === 'purchase' ? <div className="close-line" style={{ marginTop: 14 }}><span>المدفوع وقت الفاتورة</span><b>{fmt(tx.p.paid)} ج</b></div> : null}
                                     {tx.p.note ? <><h4 className="tx-title" style={{ marginTop: 22 }}>التفاصيل</h4><div style={{ color: 'var(--muted)' }}>{tx.p.note}</div></> : null}
                                     {tx.type === 'payment' && tx.p.staff ? <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 14 }}>سجّلها: {tx.p.staff}</div> : null}

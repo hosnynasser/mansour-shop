@@ -730,11 +730,11 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
         setEBusy(true);
         try {
             const orig = (() => { try { return new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(txSel.ts)); } catch { return ''; } })();
-            await api('/api/pos/ledger/' + txSel.id + '/edit', 'POST', { amount: amt, note: eNote.trim(), ...(eDate !== orig ? { date: eDate } : {}) });
+            await api('/api/pos/ledger/' + txSel.id + '/edit', 'POST', { amount: amt, note: eNote.trim(), expected: { amount: txSel.amount, ts: txSel.ts, note: txSel.note || '' }, ...(eDate !== orig ? { date: eDate } : {}) });
             notify('اتعدّل القيد ✓');
             closeTx();
             if (detail) await refreshDetail(detail.customer.id);
-        } catch { notify('مشكلة في التعديل، القيد زي ما هو', true); }
+        } catch (e: any) { notify(e?.data?.error === 'changed' ? 'القيد اتغير من مكان تاني، افتحه تاني وجرّب' : 'مشكلة في التعديل، القيد زي ما هو', true); }
         setEBusy(false);
     };
 

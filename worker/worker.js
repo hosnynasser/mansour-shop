@@ -762,8 +762,11 @@ async function handlePos(request, env, path, ctx) {
         const amount = Math.round((Number(body.amount) || 0) * 100) / 100;
         if (!(amount > 0) || amount > 1e7) return json({ error: 'bad_amount' }, 400);
         const note = clean(body.note, 200);
-        const row = await env.POS_DB.prepare('SELECT id, customer_id, ts, day, kind, invoice_id FROM ledger WHERE id = ?').bind(id).first();
+        const exp = body.expected;
+        if (!exp || !(Number(exp.amount) > 0) || typeof exp.ts !== 'string' || typeof exp.note !== 'string') return json({ error: 'bad_expected' }, 400);
+        const row = await env.POS_DB.prepare('SELECT id, customer_id, ts, day, kind, invoice_id, amount, note FROM ledger WHERE id = ?').bind(id).first();
         if (!row) return json({ error: 'not_found' }, 404);
+        if (row.amount !== Number(exp.amount) || row.ts !== exp.ts || (row.note || '') !== exp.note) return json({ error: 'changed' }, 409);
         if (row.invoice_id || (row.kind !== 'payment' && row.kind !== 'charge')) return json({ error: 'not_editable' }, 400);
         const cairoDay = (d) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
         let ts = row.ts, day = row.day;
@@ -783,8 +786,8 @@ async function handlePos(request, env, path, ctx) {
             ts = new Date(t).toISOString();
             day = wanted;
         }
-        const r = await env.POS_DB.prepare("UPDATE ledger SET amount = ?, note = ?, ts = ?, day = ? WHERE id = ? AND invoice_id IS NULL AND kind IN ('payment','charge')").bind(amount, note, ts, day, id).run();
-        if (!(r?.meta?.changes > 0)) return json({ error: 'not_found' }, 404);
+        const r = await env.POS_DB.prepare("UPDATE ledger SET amount = ?, note = ?, ts = ?, day = ? WHERE id = ? AND invoice_id IS NULL AND kind IN ('payment','charge') AND amount = ? AND ts = ? AND COALESCE(note, '') = ?").bind(amount, note, ts, day, id, row.amount, row.ts, row.note || '').run();
+        if (!(r?.meta?.changes > 0)) return json({ error: 'changed' }, 409);
         const bal = await env.POS_DB.prepare("SELECT COALESCE(SUM(CASE WHEN kind = 'charge' THEN amount ELSE -amount END), 0) AS b FROM ledger WHERE customer_id = ?").bind(row.customer_id).first();
         return json({ ok: true, balance: bal?.b ?? 0 });
     }
@@ -825,7 +828,7 @@ async function handlePos(request, env, path, ctx) {
         const id = parseInt(path.slice('/api/pos/supplier/'.length), 10) || 0;
         const sup = await env.POS_DB.prepare('SELECT * FROM suppliers WHERE id = ?').bind(id).first();
         if (!sup) return json({ error: 'not_found' }, 404);
-        const { results: purchases } = await env.POS_DB.prepare('SELECT id, num, ts, total, paid, status, note FROM purchases WHERE supplier_id = ? ORDER BY id DESC LIMIT 50').bind(id).all();
+        const { results: purchases } = await env.POS_DB.prepare('SELECT id, num, ts, total, paid, status, note FROM purchases WHERE supplier_id = ? ORDER BY ts DESC, id DESC LIMIT 50').bind(id).all();
         const { results: payments } = await env.POS_DB.prepare('SELECT id, ts, day, amount, staff, note FROM supplier_payments WHERE supplier_id = ? ORDER BY ts DESC, id DESC LIMIT 100').bind(id).all();
         return json({ supplier: sup, purchases: purchases || [], payments: payments || [] });
     }
@@ -863,12 +866,14 @@ async function handlePos(request, env, path, ctx) {
         const id = parseInt(rest.slice(0, rest.lastIndexOf('/')), 10) || 0;
         let body;
         try { body = await request.json(); } catch { return json({ error: 'bad_json' }, 400); }
-        const expected = Math.round((Number(body.expected) || 0) * 100) / 100;
-        if (!(expected > 0)) return json({ error: 'bad_expected' }, 400);
+        const expected = Number(body.expected) || 0;
+        const expTs = typeof body.expectedTs === 'string' ? body.expectedTs : '';
+        const expNote = typeof body.expectedNote === 'string' ? body.expectedNote : null;
+        if (!(expected > 0) || !expTs || expNote === null) return json({ error: 'bad_expected' }, 400);
         const row = await env.POS_DB.prepare('SELECT id, supplier_id, ts, day, amount, note FROM supplier_payments WHERE id = ?').bind(id).first();
         if (!row) return json({ error: 'not_found' }, 404);
         if (/^صرف شيك/.test(row.note || '')) return json({ error: 'cheque_payment' }, 400);
-        if (Math.abs(row.amount - expected) > 0.001) return json({ error: 'changed' }, 409);
+        if (row.amount !== expected || row.ts !== expTs || (row.note || '') !== expNote) return json({ error: 'changed' }, 409);
         const sup = await env.POS_DB.prepare('SELECT id, balance FROM suppliers WHERE id = ?').bind(row.supplier_id).first();
         if (!sup) return json({ error: 'not_found' }, 404);
         let stmts;
@@ -895,12 +900,12 @@ async function handlePos(request, env, path, ctx) {
                 day = wanted;
             }
             stmts = [
-                env.POS_DB.prepare('UPDATE supplier_payments SET amount = ?, note = ?, ts = ?, day = ? WHERE id = ? AND amount = ? AND supplier_id = ? AND ROUND((SELECT balance FROM suppliers WHERE id = ?) + ?, 2) >= 0').bind(amount, note, ts, day, id, expected, row.supplier_id, row.supplier_id, delta),
+                env.POS_DB.prepare('UPDATE supplier_payments SET amount = ?, note = ?, ts = ?, day = ? WHERE id = ? AND amount = ? AND ts = ? AND COALESCE(note, \'\') = ? AND supplier_id = ? AND ROUND((SELECT balance FROM suppliers WHERE id = ?) + ?, 2) >= 0').bind(amount, note, ts, day, id, expected, expTs, expNote, row.supplier_id, row.supplier_id, delta),
                 env.POS_DB.prepare('UPDATE suppliers SET balance = ROUND(balance + ?, 2) WHERE id = ? AND changes() = 1').bind(delta, row.supplier_id),
             ];
         } else {
             stmts = [
-                env.POS_DB.prepare('DELETE FROM supplier_payments WHERE id = ? AND amount = ? AND supplier_id = ?').bind(id, expected, row.supplier_id),
+                env.POS_DB.prepare('DELETE FROM supplier_payments WHERE id = ? AND amount = ? AND ts = ? AND COALESCE(note, \'\') = ? AND supplier_id = ?').bind(id, expected, expTs, expNote, row.supplier_id),
                 env.POS_DB.prepare('UPDATE suppliers SET balance = ROUND(balance + ?, 2) WHERE id = ? AND changes() = 1').bind(expected, row.supplier_id),
             ];
         }
