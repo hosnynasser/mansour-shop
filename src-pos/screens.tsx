@@ -172,6 +172,16 @@ function SuppliersPane({ notify }: { notify: (m: string, b?: boolean) => void })
 }
 
 // ---------- المخزون ----------
+// تاريخ المعاملة بشكل مقروء: «12 أكتوبر ساعة 01:08 ص» (بتوقيت القاهرة)
+function fmtTx(ts: string) {
+    try {
+        const d = new Date(ts);
+        const dm = new Intl.DateTimeFormat('ar-EG-u-nu-latn', { day: 'numeric', month: 'long', timeZone: 'Africa/Cairo' }).format(d);
+        const tm = new Intl.DateTimeFormat('ar-EG-u-nu-latn', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Africa/Cairo' }).format(d);
+        return dm + ' ساعة ' + tm;
+    } catch { return fmtTime(ts); }
+}
+
 export function StockScreen({ staff, products, categories, refresh, notify }: { staff: Staff; products: Product[]; categories: string[]; refresh: () => void; notify: (m: string, b?: boolean) => void }) {
     const manager = staff.role === 'manager';
     const [q, setQ] = useState('');
@@ -787,7 +797,8 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
                     <div className="sheet-back" onClick={() => setDetail(null)} />
                     <div className="sheet tall">
                         <div className="sheet-h">
-                            <h3>{detail.customer.name}</h3>
+                            <button className="btn btn-ghost btn-sm back-chev" aria-label="رجوع" onClick={() => setDetail(null)}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M9 5l7 7-7 7" /></svg></button>
+                            <h3 className="cd-title">{detail.customer.name}<small>{detail.customer.phone || 'بدون تليفون'}</small></h3>
                             {manager && !editMode && !(detail.loading || detail.err) ? (
                                 <button className="btn btn-ghost btn-sm" style={{ marginInlineStart: 'auto' }} aria-expanded={setOpen} onClick={() => setSetOpen((v) => !v)}>⚙️ إعدادات</button>
                             ) : (
@@ -818,7 +829,7 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
                                     <div className="bal-card">
                                         <div className="l">الرصيد المستحق على العميل</div>
                                         <div className="v" style={{ color: detail.balance > 0 ? 'var(--danger)' : detail.balance < 0 ? '#0f7a44' : 'var(--ink)' }}>{fmt(Math.abs(detail.balance))} ج{detail.balance < 0 ? ' (له)' : ''}</div>
-                                        <div className="s">{detail.customer.phone || 'بدون تليفون'}{detail.customer.grp ? ' · ' + detail.customer.grp : ''}{detail.customer.notes ? ' · ' + detail.customer.notes : ''}</div>
+                                        {detail.customer.grp || detail.customer.notes ? <div className="s">{detail.customer.grp || ''}{detail.customer.grp && detail.customer.notes ? ' · ' : ''}{detail.customer.notes || ''}</div> : null}
                                     </div>
                                     {!(detail.loading || detail.err) && startDebtInvoice ? (
                                         <button className="btn btn-blue btn-sm btn-block" style={{ minHeight: 44, marginBottom: 12 }} onClick={() => { const id = detail.customer.id; setDetail(null); startDebtInvoice(id); }}>فاتورة آجل جديدة</button>
@@ -859,7 +870,7 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
                                 </div>
                             ) : null}
 
-                            <h4 style={{ color: 'var(--navy)', margin: '14px 0 8px' }}>المعاملات{!(detail.loading || detail.err) ? ' (' + detail.ledger.length + ')' : ''}</h4>
+                            <h4 className="tx-title">معاملات{!(detail.loading || detail.err) ? ' (' + detail.ledger.length + ')' : ''}</h4>
                             {detail.err ? <div className="empty" style={{ padding: 16 }}>ماقدرناش نحمّل الحركات. الرصيد الظاهر من القايمة.<div style={{ marginTop: 10 }}><button className="btn btn-blue btn-sm" onClick={() => openDetail(detail.customer.id)}>جرّب تاني</button></div></div> : detail.loading ? <div className="empty" style={{ padding: 16 }}>جاري تحميل الحركات…</div> : detail.ledger.length === 0 ? <div className="empty" style={{ padding: 16 }}>مفيش حركات</div> : (() => {
                                 let run = Math.round((detail.balance || 0) * 100) / 100;
                                 return detail.ledger.map((l: any) => {
@@ -873,8 +884,8 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
                                                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">{isCharge ? <><path d="M12 19V5" /><path d="M6 11l6-6 6 6" /></> : <><path d="M12 5v14" /><path d="M6 13l6 6 6-6" /></>}</svg>
                                             </span>
                                             <div className="tx-mid">
-                                                <div className="tx-d">{fmtTime(l.ts)}</div>
-                                                <div className="tx-b">الرصيد بعدها: {fmt(Math.abs(after))} ج{after < 0 ? ' (له)' : ''}</div>
+                                                <div className="tx-d">{fmtTx(l.ts)}</div>
+                                                <div className="tx-b" style={{ color: after > 0 ? 'var(--danger)' : '#0f7a44' }}>الرصيد بعدها {fmt(Math.abs(after))} ج{after < 0 ? ' (له)' : ''}</div>
                                                 {l.note || l.staff ? <div className="tx-n">{l.note ? l.note + ' · ' : ''}{l.staff}</div> : null}
                                             </div>
                                             <div className="tx-amt">

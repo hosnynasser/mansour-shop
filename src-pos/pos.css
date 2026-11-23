@@ -314,3 +314,13 @@ html.dd-lock,html.dd-lock body,html.dd-lock #root,html.dd-lock .pos-main{overflo
 .sheet-warn{flex:none;background:#fff7e6;border-top:1.5px solid #f0c36d;padding:10px 16px calc(10px + env(safe-area-inset-bottom));font-size:14px;color:#6b4a00}
 .sheet-warn .sw-row{display:flex;gap:8px;margin-top:8px}
 .sheet-warn .btn{flex:1;min-height:42px}
+
+.sheet-h .cd-title{flex:1;text-align:center;line-height:1.2;margin:0 6px}
+.sheet-h .cd-title small{display:block;font-size:12px;font-weight:600;color:var(--muted);direction:ltr}
+.sheet-h .back-chev{font-size:26px;line-height:1;padding:2px 12px;min-height:40px;color:var(--blue);font-weight:800}
+.bal-card{border:1px solid var(--line)}
+.bal-card .l{color:var(--blue)}
+.bal-card .v{font-size:40px}
+.tx-title{color:var(--blue);font-size:17px;margin:16px 0 6px;font-weight:800}
+.tx-d{font-size:15px}
+.tx-b{font-weight:600}
