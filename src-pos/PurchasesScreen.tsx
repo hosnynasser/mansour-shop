@@ -13,7 +13,7 @@ export default function PurchasesScreen({ products, refresh, notify, onChequesCh
     const [newOpen, setNewOpen] = useState(false);
     const [supOpen, setSupOpen] = useState(false);
     const [detail, setDetail] = useState<{ p: Purchase; items: PurchaseItem[] } | null>(null);
-    const [supDetail, setSupDetail] = useState<{ s: Supplier; purchases: Purchase[] } | null>(null);
+    const [supDetail, setSupDetail] = useState<{ s: Supplier; purchases: Purchase[]; payments?: any[] } | null>(null);
 
     const load = async () => {
         try {
@@ -44,7 +44,7 @@ export default function PurchasesScreen({ products, refresh, notify, onChequesCh
     const openSupplier = async (id: number) => {
         try {
             const r = await api('/api/pos/supplier/' + id);
-            setSupDetail({ s: r.supplier, purchases: r.purchases || [] });
+            setSupDetail({ s: r.supplier, purchases: r.purchases || [], payments: r.payments || [] });
         } catch { notify('مشكلة في فتح المورد', true); }
     };
 
@@ -120,7 +120,7 @@ export default function PurchasesScreen({ products, refresh, notify, onChequesCh
                 </>
             ) : null}
 
-            {supDetail ? <SupplierSheet data={supDetail} onClose={() => setSupDetail(null)} onChanged={() => { setSupDetail(null); load(); }} notify={notify} /> : null}
+            {supDetail ? <SupplierSheet data={supDetail} onClose={() => setSupDetail(null)} onChanged={() => { setSupDetail(null); load(); }} onReload={load} notify={notify} /> : null}
         </>
     );
 }
@@ -153,16 +153,43 @@ export function NewSupplierSheet({ onClose, onDone, notify, groups }: { groups?:
     );
 }
 
-export function SupplierSheet({ data, onClose, onChanged, notify, groups }: { groups?: string[]; data: { s: Supplier; purchases: Purchase[] }; onClose: () => void; onChanged: () => void; notify: (m: string, b?: boolean) => void }) {
-    const { s, purchases } = data;
+const cairoDayOf = (ts: string) => { try { return new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(ts)); } catch { return ''; } };
+function fmtTxS(ts: string) {
+    try {
+        const d = new Date(ts);
+        const dm = new Intl.DateTimeFormat('ar-EG-u-nu-latn', { day: 'numeric', month: 'long', timeZone: 'Africa/Cairo' }).format(d);
+        const tm = new Intl.DateTimeFormat('ar-EG-u-nu-latn', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Africa/Cairo' }).format(d);
+        return dm + ' ساعة ' + tm;
+    } catch { return fmtTime(ts); }
+}
+
+export function SupplierSheet({ data, onClose, onChanged, onReload, notify, groups }: { groups?: string[]; data: { s: Supplier; purchases: Purchase[]; payments?: any[] }; onClose: () => void; onChanged: () => void; onReload?: () => void; notify: (m: string, b?: boolean) => void }) {
+    const [d, setD] = useState(data);
+    const { s, purchases } = d;
+    const payments = d.payments || [];
     const [amount, setAmount] = useState('');
     const [busy, setBusy] = useState(false);
     const [g, setG] = useState(s.grp || '');
     const [gBusy, setGBusy] = useState(false);
+    const [setOpen, setSetOpen] = useState(false);
+    const [payOpen, setPayOpen] = useState(false);
+    const [txSel, setTxSel] = useState<any>(null);
+    const [txEdit, setTxEdit] = useState(false);
+    const [eAmt, setEAmt] = useState('');
+    const [eDate, setEDate] = useState('');
+    const [eNote, setENote] = useState('');
+    const [eBusy, setEBusy] = useState(false);
+    const reload = async () => {
+        const r = await api('/api/pos/supplier/' + s.id);
+        setD({ s: r.supplier, purchases: r.purchases || [], payments: r.payments || [] });
+        setG(r.supplier.grp || '');
+        if (onReload) onReload();
+    };
     const saveGrp = async () => {
         setGBusy(true);
-        try { await api('/api/pos/supplier/' + s.id, 'PATCH', { name: s.name, phone: s.phone || '', notes: s.notes || '', grp: g.trim() }); notify('اتحفظت المجموعة ✓'); onChanged(); }
-        catch { notify('مشكلة في حفظ المجموعة', true); setGBusy(false); }
+        try { await api('/api/pos/supplier/' + s.id, 'PATCH', { name: s.name, phone: s.phone || '', notes: s.notes || '', grp: g.trim() }); notify('اتحفظت المجموعة ✓'); await reload(); setSetOpen(false); }
+        catch { notify('مشكلة في حفظ المجموعة', true); }
+        setGBusy(false);
     };
     const pay = async () => {
         const a = Number(amount) || 0;
@@ -171,34 +198,180 @@ export function SupplierSheet({ data, onClose, onChanged, notify, groups }: { gr
         try {
             const r = await api(`/api/pos/supplier/${s.id}/payment`, 'POST', { amount: a });
             notify('اتسجلت الدفعة ✓ — المتبقي ' + fmt(r.balance) + ' ج');
-            onChanged();
-        } catch { notify('مشكلة في التسجيل', true); setBusy(false); }
+            setAmount(''); setPayOpen(false);
+            await reload();
+        } catch { notify('مشكلة في التسجيل', true); }
+        setBusy(false);
     };
+    const errMsg = (e: any) => {
+        const c = e?.data?.error;
+        if (c === 'changed') return 'القيد اتغير من مكان تاني، افتحه تاني وجرّب';
+        if (c === 'exceeds_balance') return 'المبلغ الجديد أكبر من المتبقي للمورد';
+        if (c === 'cheque_payment') return 'دفعة صرف الشيك مش بتتعدل من هنا';
+        if (c === 'future_date') return 'مينفعش تاريخ في المستقبل';
+        return 'مشكلة، القيد والرصيد زي ما هم';
+    };
+    const closeTx = () => { setTxSel(null); setTxEdit(false); };
+    const saveTx = async () => {
+        if (!txSel || eBusy) return;
+        const amt = Math.round((Number(eAmt) || 0) * 100) / 100;
+        if (!(amt > 0)) { notify('اكتب مبلغ صحيح', true); return; }
+        if (!eDate) { notify('اختار التاريخ', true); return; }
+        if (!confirm('تعدّل الدفعة؟ المبلغ من ' + fmt(txSel.p.amount) + ' ج إلى ' + fmt(amt) + ' ج، ورصيد المورد هيتعدّل بالفرق.')) return;
+        setEBusy(true);
+        try {
+            await api('/api/pos/supplier-payment/' + txSel.id + '/edit', 'POST', { expected: txSel.p.amount, amount: amt, note: eNote.trim(), ...(eDate !== cairoDayOf(txSel.ts) ? { date: eDate } : {}) });
+            notify('اتعدّلت الدفعة ✓');
+            closeTx();
+            await reload();
+        } catch (e: any) { notify(errMsg(e), true); }
+        setEBusy(false);
+    };
+    const delTx = async () => {
+        if (!txSel || eBusy) return;
+        if (!confirm('تمسح الدفعة دي؟ المبلغ هيرجع على رصيد المورد.')) return;
+        setEBusy(true);
+        try {
+            await api('/api/pos/supplier-payment/' + txSel.id + '/delete', 'POST', { expected: txSel.p.amount });
+            notify('اتمسحت الدفعة ✓');
+            closeTx();
+            await reload();
+        } catch (e: any) { notify(errMsg(e), true); }
+        setEBusy(false);
+    };
+
+    // قايمة المعاملات: فواتير الشراء (بتزود المستحق بقيمة المتبقي) + الدفعات (بتنقصه). الرصيد بعد كل حركة بيتحسب من الرصيد الحالي للخلف.
+    const rows = (() => {
+        const all: any[] = [];
+        purchases.filter((p) => p.status !== 'voided').forEach((p) => all.push({ type: 'purchase', id: p.id, ts: p.ts, effect: Math.round((p.total - p.paid) * 100) / 100, p }));
+        payments.forEach((p: any) => all.push({ type: 'payment', id: p.id, ts: p.ts, effect: -p.amount, p }));
+        let cutoff = '';
+        if (purchases.length >= 50) cutoff = purchases.reduce((m, p) => (m === '' || p.ts < m ? p.ts : m), '');
+        if (payments.length >= 100) { const pc = payments.reduce((m: string, p: any) => (m === '' || p.ts < m ? p.ts : m), ''); if (pc > cutoff) cutoff = pc; }
+        const list = all.filter((x) => !cutoff || x.ts >= cutoff);
+        list.sort((a, b) => (a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : a.type !== b.type ? (a.type === 'payment' ? -1 : 1) : b.id - a.id));
+        let run = Math.round((s.balance || 0) * 100) / 100;
+        return list.map((x) => { const after = run; run = Math.round((run - x.effect) * 100) / 100; return { ...x, after }; });
+    })();
+    const hasCheque = payments.some((p: any) => /^صرف شيك/.test(p.note || ''));
+    const Arrow = ({ up }: { up: boolean }) => (
+        <span className={'tx-ic ' + (up ? 'up' : 'down')} aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">{up ? <><path d="M12 19V5" /><path d="M6 11l6-6 6 6" /></> : <><path d="M12 5v14" /><path d="M6 13l6 6 6-6" /></>}</svg>
+        </span>
+    );
+    const owe = s.balance > 0;
+    const tx = txSel;
     return (
         <>
             <div className="sheet-back" onClick={onClose} />
-            <div className="sheet">
-                <div className="sheet-h"><h3>🚚 {s.name}</h3><button className="btn btn-ghost btn-sm" style={{ marginInlineStart: 'auto' }} onClick={onClose}>قفل</button></div>
+            <div className="sheet tall">
+                <div className="sheet-h">
+                    <button className="btn btn-ghost btn-sm back-chev" aria-label="رجوع" onClick={onClose}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M9 5l7 7-7 7" /></svg></button>
+                    <h3 className="cd-title">{s.name}<small>{s.phone || 'بدون تليفون'}</small></h3>
+                    <button className="btn btn-ghost btn-sm" style={{ marginInlineStart: 'auto' }} aria-expanded={setOpen} onClick={() => setSetOpen((v) => !v)}>⚙️ إعدادات</button>
+                </div>
                 <div className="sheet-b">
-                    {s.phone ? <div className="close-line"><span>التليفون</span><b dir="ltr">{s.phone}</b></div> : null}
-                    <div className="close-line" style={{ fontSize: 17 }}><span>المتبقي ليه</span><b style={{ color: s.balance > 0 ? 'var(--danger)' : 'var(--ok)' }}>{fmt(s.balance)} ج</b></div>
-                    {s.balance > 0 ? (
-                        <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
-                            <input inputMode="decimal" placeholder="المبلغ المسدد" value={amount} onChange={(e) => setAmount(e.target.value)} style={{ flex: 1, border: '1.5px solid var(--line)', borderRadius: 10, padding: '9px 12px' }} />
-                            <button className="btn btn-navy btn-sm" disabled={busy} onClick={pay}>{busy ? '…' : 'تسديد'}</button>
+                    {setOpen ? (
+                        <div className="close-card" style={{ marginBottom: 10 }}>
+                            <h4>المجموعة</h4>
+                            <div style={{ display: 'flex', gap: 6 }}>
+                                <input list="sgrp-list2" maxLength={40} placeholder="المجموعة (اختياري)" value={g} onChange={(e) => setG(e.target.value)} style={{ flex: 1, border: '1.5px solid var(--line)', borderRadius: 10, padding: '9px 12px', fontSize: 16 }} />
+                                <datalist id="sgrp-list2">{(groups || []).map((x) => <option key={x} value={x} />)}</datalist>
+                                {g.trim() !== (s.grp || '') ? <button className="btn btn-navy btn-sm" disabled={gBusy} onClick={saveGrp}>{gBusy ? '…' : 'حفظ'}</button> : null}
+                            </div>
                         </div>
                     ) : null}
-                    <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
-                        <input list="sgrp-list2" maxLength={40} placeholder="المجموعة (اختياري)" value={g} onChange={(e) => setG(e.target.value)} style={{ flex: 1, border: '1.5px solid var(--line)', borderRadius: 10, padding: '9px 12px', fontSize: 16 }} />
-                        <datalist id="sgrp-list2">{(groups || []).map((x) => <option key={x} value={x} />)}</datalist>
-                        {g.trim() !== (s.grp || '') ? <button className="btn btn-navy btn-sm" disabled={gBusy} onClick={saveGrp}>{gBusy ? '…' : 'حفظ'}</button> : null}
+                    <div className="bal-card">
+                        <div className="l">{s.balance < 0 ? 'ليك عند المورد' : 'المتبقي للمورد'}</div>
+                        <div className="v" style={{ color: owe ? 'var(--danger)' : s.balance < 0 ? '#0f7a44' : 'var(--ink)' }}>{fmt(Math.abs(s.balance))} ج</div>
+                        {s.grp || s.notes ? <div className="s">{s.grp || ''}{s.grp && s.notes ? ' · ' : ''}{s.notes || ''}</div> : null}
                     </div>
-                    <h4 style={{ margin: '14px 0 6px' }}>فواتير الشراء منه</h4>
-                    {purchases.length === 0 ? <div style={{ fontSize: 13, color: 'var(--muted)' }}>مفيش فواتير منه لسه</div> : purchases.filter((p) => p.status !== 'voided').map((p) => (
-                        <div className="close-line" key={p.id}><span>{p.num} · {fmtTime(p.ts)}</span><b>{fmt(p.total)} ج</b></div>
-                    ))}
+                    {payOpen && owe ? (
+                        <div className="close-card">
+                            <h4>تسديد للمورد</h4>
+                            <div className="field"><input inputMode="decimal" placeholder="المبلغ المسدد" value={amount} onChange={(e) => setAmount(e.target.value)} /></div>
+                            {Number(amount) > 0 ? <div style={{ fontSize: 13, color: 'var(--muted)', margin: '-4px 0 8px' }}>المتبقي بعد الدفعة: <b>{fmt(Math.max(0, s.balance - Number(amount)))} ج</b></div> : null}
+                            <div style={{ display: 'flex', gap: 8 }}>
+                                <button className="btn btn-blue btn-sm" disabled={busy} onClick={pay}>{busy ? '…' : 'تسديد'}</button>
+                                <button className="btn btn-ghost btn-sm" onClick={() => setAmount(String(s.balance))}>كامل المبلغ</button>
+                            </div>
+                        </div>
+                    ) : null}
+                    <h4 className="tx-title">معاملات ({rows.length})</h4>
+                    {rows.length === 0 ? <div className="empty" style={{ padding: 16 }}>مفيش معاملات لسه</div> : rows.map((x) => {
+                        const isP = x.type === 'purchase';
+                        return (
+                            <div className="tx-row" key={x.type + x.id} role="button" tabIndex={0} style={{ cursor: 'pointer' }} onClick={() => { setTxSel(x); setTxEdit(false); }}>
+                                <Arrow up={isP} />
+                                <div className="tx-mid">
+                                    <div className="tx-d">{fmtTxS(x.ts)}</div>
+                                    <div className="tx-b" style={{ color: x.after > 0 ? 'var(--danger)' : '#0f7a44' }}>الرصيد بعدها {fmt(Math.abs(x.after))} ج{x.after < 0 ? ' (ليك)' : ''}</div>
+                                    <div className="tx-n">{isP ? x.p.num : (x.p.note || '')}{!isP && x.p.staff ? (x.p.note ? ' · ' : '') + x.p.staff : ''}</div>
+                                </div>
+                                <div className="tx-amt">
+                                    <b style={{ color: isP ? 'var(--danger)' : '#0f7a44' }}>{fmt(isP ? x.p.total : x.p.amount)} ج</b>
+                                    <span>{isP ? 'فاتورة شراء' : 'دفعة'}</span>
+                                </div>
+                            </div>
+                        );
+                    })}
+                    {hasCheque ? <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 8 }}>فيه دفعات صرف شيك، فالرصيد بعد الحركات القديمة تقريبي.</div> : null}
                 </div>
+                {owe ? (
+                    <div className="detail-bar">
+                        <button className="btn db-pay" onClick={() => setPayOpen((v) => !v)}>تسديد دفعة</button>
+                    </div>
+                ) : null}
             </div>
+            {tx ? (
+                <>
+                    <div className="sheet-back" style={{ zIndex: 60 }} onClick={closeTx} />
+                    <div className="sheet tall" style={{ zIndex: 61 }}>
+                        <div className="sheet-h">
+                            <button className="btn btn-ghost btn-sm back-chev" aria-label="رجوع" onClick={closeTx}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M9 5l7 7-7 7" /></svg></button>
+                            <h3 className="cd-title">{s.name}</h3>
+                        </div>
+                        <div className="sheet-b">
+                            {txEdit ? (
+                                <>
+                                    <h4 className="tx-title">تعديل دفعة</h4>
+                                    <div className="field"><label>المبلغ</label><input inputMode="decimal" value={eAmt} onChange={(e) => setEAmt(e.target.value)} /></div>
+                                    <div className="field"><label>التاريخ</label><input type="date" dir="ltr" style={{ textAlign: 'end' }} max={cairoDayOf(new Date().toISOString())} value={eDate} onChange={(e) => setEDate(e.target.value)} /></div>
+                                    <div className="field"><label>التفاصيل</label><input maxLength={200} value={eNote} onChange={(e) => setENote(e.target.value)} /></div>
+                                    <div style={{ fontSize: 12, color: 'var(--muted)' }}>تغيير المبلغ بيعدّل رصيد المورد بالفرق، وتغيير التاريخ بينقل الدفعة لليوم الجديد في التقارير.</div>
+                                </>
+                            ) : (
+                                <>
+                                    <div className="tx-d" style={{ fontSize: 17, marginTop: 6 }}>{fmtTxS(tx.ts)}</div>
+                                    <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 14 }}>{tx.type === 'purchase' ? 'فاتورة شراء ' + tx.p.num : 'دفعة للمورد'}</div>
+                                    <div style={{ fontSize: 40, fontWeight: 800, color: tx.type === 'purchase' ? 'var(--danger)' : '#0f7a44', lineHeight: 1.2 }}>{fmt(tx.type === 'purchase' ? tx.p.total : tx.p.amount)} ج</div>
+                                    <div className="tx-b" style={{ display: 'inline-block', marginTop: 8, padding: '3px 10px', borderRadius: 8, background: tx.after > 0 ? '#fdeaea' : '#e7f6ec', color: tx.after > 0 ? 'var(--danger)' : '#0f7a44' }}>الرصيد بعدها {fmt(Math.abs(tx.after))} ج{tx.after < 0 ? ' (ليك)' : ''}</div>
+                                    {tx.type === 'purchase' ? <div className="close-line" style={{ marginTop: 14 }}><span>المدفوع وقت الفاتورة</span><b>{fmt(tx.p.paid)} ج</b></div> : null}
+                                    {tx.p.note ? <><h4 className="tx-title" style={{ marginTop: 22 }}>التفاصيل</h4><div style={{ color: 'var(--muted)' }}>{tx.p.note}</div></> : null}
+                                    {tx.type === 'payment' && tx.p.staff ? <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 14 }}>سجّلها: {tx.p.staff}</div> : null}
+                                    {tx.type === 'purchase' ? <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 18 }}>فاتورة الشراء مرتبطة بالمخزون، تعديلها أو إلغاؤها من شاشة المشتريات.</div> : null}
+                                    {tx.type === 'payment' && /^صرف شيك/.test(tx.p.note || '') ? <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 18 }}>دفعة صرف شيك، مش بتتعدل من هنا.</div> : null}
+                                </>
+                            )}
+                        </div>
+                        {tx.type === 'payment' && !/^صرف شيك/.test(tx.p.note || '') ? (
+                            <div className="detail-bar">
+                                {txEdit ? (
+                                    <>
+                                        <button className="btn db-pay" disabled={eBusy} onClick={saveTx}>حفظ</button>
+                                        <button className="btn db-debt" disabled={eBusy} onClick={() => setTxEdit(false)}>إلغاء</button>
+                                    </>
+                                ) : (
+                                    <>
+                                        <button className="btn" style={{ background: '#e3f0ff', color: 'var(--blue)' }} onClick={() => { setEAmt(String(tx.p.amount)); setEDate(cairoDayOf(tx.ts)); setENote(tx.p.note || ''); setTxEdit(true); }}>تعديل</button>
+                                        <button className="btn db-debt" disabled={eBusy} onClick={delTx}>حذف</button>
+                                    </>
+                                )}
+                            </div>
+                        ) : null}
+                    </div>
+                </>
+            ) : null}
         </>
     );
 }

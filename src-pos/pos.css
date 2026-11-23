@@ -327,3 +327,5 @@ html.dd-lock,html.dd-lock body,html.dd-lock #root,html.dd-lock .pos-main{overflo
 .grp-btn{display:inline-flex;align-items:center;gap:4px;flex:0 0 auto;max-width:42%;border:0;border-inline-start:1.5px solid var(--line);background:none;padding:4px 0;padding-inline-start:10px;font-size:14px;font-weight:700;color:var(--navy);white-space:nowrap}
 .grp-btn span:first-child{overflow:hidden;text-overflow:ellipsis}
 .grp-menu{position:absolute;inset-inline:0;top:58px;z-index:20;background:#fff;border:1.5px solid var(--line);border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.15);max-height:280px;overflow-y:auto}
+
+.grp-btn{border-inline-start:0 !important;border-inline-end:1.5px solid var(--line);padding-inline-start:0 !important;padding-inline-end:10px}

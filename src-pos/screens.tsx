@@ -122,7 +122,7 @@ function SuppliersPane({ notify }: { notify: (m: string, b?: boolean) => void })
     const [det, setDet] = useState<any>(null);
     const load = async () => { const c0 = cred(); setFst('loading'); try { const r = await api('/api/pos/suppliers'); setList(r.suppliers || []); csetIf('suppliers', r.suppliers || [], c0); setFst('ok'); } catch { setFst('err'); notify('مشكلة في تحميل الموردين، الأرقام المعروضة قديمة', true); } };
     useEffect(() => { load(); }, []);
-    const open = async (id: number) => { try { const r = await api('/api/pos/supplier/' + id); setDet({ s: r.supplier, purchases: r.purchases || [] }); } catch { notify('مشكلة في فتح المورد', true); } };
+    const open = async (id: number) => { try { const r = await api('/api/pos/supplier/' + id); setDet({ s: r.supplier, purchases: r.purchases || [], payments: r.payments || [] }); } catch { notify('مشكلة في فتح المورد', true); } };
     const all = list || [];
     const groups = useMemo(() => Array.from(new Set(all.map((x) => (x.grp || '').trim()).filter(Boolean))).sort() as string[], [list]);
     useEffect(() => { if (grpSel && grpSel !== '__none' && !groups.includes(grpSel)) setGrpSel(''); }, [groups, grpSel]);
@@ -147,9 +147,9 @@ function SuppliersPane({ notify }: { notify: (m: string, b?: boolean) => void })
             {fst === 'loading' ? <div style={{ fontSize: 12, color: 'var(--muted)', textAlign: 'center', margin: '-2px 0 6px' }}>بيتحدّث… الأرقام دي من آخر مرة</div> : fst === 'err' ? <div style={{ fontSize: 12, color: 'var(--danger)', textAlign: 'center', margin: '-2px 0 6px' }}>فشل التحديث، الأرقام دي من آخر مرة ومش محدّثة</div> : null}
             <div className="search-wrap" style={{ top: 0 }}>
                 <div className="search-box" style={{ padding: '7px 12px' }}>
+                    <button className="grp-btn" aria-expanded={grpOpen} onClick={() => setGrpOpen((v) => !v)}><span>{grpSel === '' ? 'المجموعة' : grpSel === '__none' ? 'بدون مجموعة' : grpSel}</span><span style={{ display: 'inline-block', transform: grpOpen ? 'rotate(180deg)' : 'none' }}>▾</span></button>
                     <span className="si"><Icon n="search" size={18} /></span>
                     <input placeholder="ابحث بالاسم أو التليفون…" value={q} onChange={(e) => setQ(e.target.value)} style={{ fontSize: 16 }} />
-                    <button className="grp-btn" aria-expanded={grpOpen} onClick={() => setGrpOpen((v) => !v)}><span>{grpSel === '' ? 'المجموعة' : grpSel === '__none' ? 'بدون مجموعة' : grpSel}</span><span style={{ display: 'inline-block', transform: grpOpen ? 'rotate(180deg)' : 'none' }}>▾</span></button>
                 </div>
                 {grpOpen ? (
                     <div className="grp-menu">
@@ -169,7 +169,7 @@ function SuppliersPane({ notify }: { notify: (m: string, b?: boolean) => void })
             <div style={{ height: 70 }} />
             <button className="fab-add" onClick={() => setNewOpen(true)}><Icon n="plus" size={20} /> إضافة مورد</button>
             {newOpen ? <NewSupplierSheet groups={groups} onClose={() => setNewOpen(false)} onDone={() => { setNewOpen(false); load(); notify('اتضاف المورد ✓'); }} notify={notify} /> : null}
-            {det ? <SupplierSheet groups={groups} data={det} onClose={() => setDet(null)} onChanged={() => { setDet(null); load(); }} notify={notify} /> : null}
+            {det ? <SupplierSheet groups={groups} data={det} onClose={() => setDet(null)} onChanged={() => { setDet(null); load(); }} onReload={load} notify={notify} /> : null}
         </>
     );
 }
@@ -609,6 +609,7 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
     const [grpSel, setGrpSel] = useState('');
     const [grpOpen, setGrpOpen] = useState(false);
     const [setOpen, setSetOpen] = useState(false);
+    const [secOpen, setSecOpen] = useState(false);
     useEffect(() => { if (!detail) setSetOpen(false); }, [detail]);
     const [grp, setGrp] = useState('');
 
@@ -756,9 +757,12 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
 
     return (
         <>
-            <div className="pay-toggle" style={{ marginBottom: 8 }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'stretch', marginBottom: 8 }}>
+            <div className="pay-toggle" style={{ marginBottom: 0, flex: 1 }}>
                 <button className={mode === 'cust' ? 'on' : ''} onClick={() => setMode('cust')} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '8px 4px' }}><Icon n="users" size={18} /> العملاء</button>
                 {manager ? <button className={mode === 'sup' ? 'on' : ''} onClick={() => setMode('sup')} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '8px 4px' }}><Icon n="truck" size={18} /> الموردين</button> : null}
+            </div>
+                <button className="btn btn-ghost" aria-label="إعدادات القسم" aria-expanded={secOpen} style={{ flex: 'none', minWidth: 46, fontSize: 20, padding: '0 10px' }} onClick={() => setSecOpen(true)}>⚙️</button>
             </div>
             {mode === 'sup' && manager ? <SuppliersPane notify={notify} /> : (<>
             <div className="close-card" style={{ display: 'flex', padding: '2px 4px', marginBottom: 8 }}>
@@ -769,9 +773,9 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
             {cst === 'loading' && !loading ? <div style={{ fontSize: 12, color: 'var(--muted)', textAlign: 'center', margin: '-2px 0 6px' }}>بيتحدّث… الأرقام دي من آخر مرة</div> : cst === 'err' ? <div style={{ fontSize: 12, color: 'var(--danger)', textAlign: 'center', margin: '-2px 0 6px' }}>فشل التحديث، الأرقام دي من آخر مرة ومش محدّثة</div> : null}
             <div className="search-wrap" style={{ top: 0 }}>
                 <div className="search-box" style={{ padding: '7px 12px' }}>
+                    <button className="grp-btn" aria-expanded={grpOpen} onClick={() => setGrpOpen((v) => !v)}><span>{grpSel === '' ? 'المجموعة' : grpSel === '__none' ? 'بدون مجموعة' : grpSel}</span><span style={{ display: 'inline-block', transform: grpOpen ? 'rotate(180deg)' : 'none' }}>▾</span></button>
                     <span className="si"><Icon n="search" size={18} /></span>
                     <input placeholder="ابحث بالاسم أو التليفون…" value={q} onChange={(e) => setQ(e.target.value)} style={{ fontSize: 16 }} />
-                    <button className="grp-btn" aria-expanded={grpOpen} onClick={() => setGrpOpen((v) => !v)}><span>{grpSel === '' ? 'المجموعة' : grpSel === '__none' ? 'بدون مجموعة' : grpSel}</span><span style={{ display: 'inline-block', transform: grpOpen ? 'rotate(180deg)' : 'none' }}>▾</span></button>
                 </div>
                 {grpOpen ? (
                     <div className="grp-menu">
@@ -938,6 +942,15 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
                                 <button className="btn db-pay" onClick={() => { setPayOpen((v) => !v); setDebtOpen(false); document.querySelector('.sheet.tall .sheet-b')?.scrollTo({ top: 0, behavior: 'smooth' }); }}>تسجيل دفعة</button>
                             </div>
                         ) : null}
+                    </div>
+                </>
+            ) : null}
+            {secOpen ? (
+                <>
+                    <div className="sheet-back" onClick={() => setSecOpen(false)} />
+                    <div className="sheet">
+                        <div className="sheet-h"><h3>{mode === 'sup' ? 'إعدادات الموردين' : 'إعدادات العملاء'}</h3><button className="btn btn-ghost btn-sm" style={{ marginInlineStart: 'auto' }} onClick={() => setSecOpen(false)}>قفل</button></div>
+                        <div className="sheet-b"><div className="empty" style={{ padding: 24 }}>لسه مفيش إعدادات</div></div>
                     </div>
                 </>
             ) : null}

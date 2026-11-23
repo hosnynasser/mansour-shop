@@ -825,8 +825,9 @@ async function handlePos(request, env, path, ctx) {
         const id = parseInt(path.slice('/api/pos/supplier/'.length), 10) || 0;
         const sup = await env.POS_DB.prepare('SELECT * FROM suppliers WHERE id = ?').bind(id).first();
         if (!sup) return json({ error: 'not_found' }, 404);
-        const { results: purchases } = await env.POS_DB.prepare('SELECT id, num, ts, total, paid, status FROM purchases WHERE supplier_id = ? ORDER BY id DESC LIMIT 50').bind(id).all();
-        return json({ supplier: sup, purchases: purchases || [] });
+        const { results: purchases } = await env.POS_DB.prepare('SELECT id, num, ts, total, paid, status, note FROM purchases WHERE supplier_id = ? ORDER BY id DESC LIMIT 50').bind(id).all();
+        const { results: payments } = await env.POS_DB.prepare('SELECT id, ts, day, amount, staff, note FROM supplier_payments WHERE supplier_id = ? ORDER BY ts DESC, id DESC LIMIT 100').bind(id).all();
+        return json({ supplier: sup, purchases: purchases || [], payments: payments || [] });
     }
     if (path.startsWith('/api/pos/supplier/') && request.method === 'PATCH') {
         if (!manager) return json({ error: 'forbidden' }, 403);
@@ -852,6 +853,62 @@ async function handlePos(request, env, path, ctx) {
         return json({ ok: true });
     }
     // تسديد دفعة لمورد
+    // تعديل/حذف دفعة مورد يدوية (مدير فقط). الرصيد مخزّن، فالتعديل بيتم كـ delta جوّه batch واحد:
+    // القيد بيتغير بشرط إن مبلغه هو اللي العميل شافه (لو اتغير في الأثناء الطلب بيترفض) والرصيد بيتغير بشرط إن القيد فعلاً اتغير (changes()).
+    // دفعات صرف الشيك مش بتتعدل من هنا لأن مبلغها المسجل ممكن يزيد عن اللي اتخصم فعلاً.
+    if (path.startsWith('/api/pos/supplier-payment/') && (path.endsWith('/edit') || path.endsWith('/delete')) && request.method === 'POST') {
+        if (!manager) return json({ error: 'forbidden' }, 403);
+        const isEdit = path.endsWith('/edit');
+        const rest = path.slice('/api/pos/supplier-payment/'.length);
+        const id = parseInt(rest.slice(0, rest.lastIndexOf('/')), 10) || 0;
+        let body;
+        try { body = await request.json(); } catch { return json({ error: 'bad_json' }, 400); }
+        const expected = Math.round((Number(body.expected) || 0) * 100) / 100;
+        if (!(expected > 0)) return json({ error: 'bad_expected' }, 400);
+        const row = await env.POS_DB.prepare('SELECT id, supplier_id, ts, day, amount, note FROM supplier_payments WHERE id = ?').bind(id).first();
+        if (!row) return json({ error: 'not_found' }, 404);
+        if (/^صرف شيك/.test(row.note || '')) return json({ error: 'cheque_payment' }, 400);
+        if (Math.abs(row.amount - expected) > 0.001) return json({ error: 'changed' }, 409);
+        const sup = await env.POS_DB.prepare('SELECT id, balance FROM suppliers WHERE id = ?').bind(row.supplier_id).first();
+        if (!sup) return json({ error: 'not_found' }, 404);
+        let stmts;
+        if (isEdit) {
+            const amount = Math.round((Number(body.amount) || 0) * 100) / 100;
+            if (!(amount > 0) || amount > 1e9) return json({ error: 'bad_amount' }, 400);
+            const note = clean(body.note, 200);
+            const delta = Math.round((row.amount - amount) * 100) / 100; // الرصيد بيزيد بالـ delta (دفعة أقل = رصيد أعلى)
+            if (Math.round((sup.balance + delta) * 100) / 100 < 0) return json({ error: 'exceeds_balance' }, 400);
+            let ts = row.ts, day = row.day;
+            const wanted = clean(body.date, 10);
+            if (wanted && wanted !== day) {
+                if (!/^\d{4}-\d{2}-\d{2}$/.test(wanted)) return json({ error: 'bad_date' }, 400);
+                const [Y, M, D] = wanted.split('-').map(Number);
+                const chk = new Date(Date.UTC(Y, M - 1, D));
+                if (chk.getUTCFullYear() !== Y || chk.getUTCMonth() !== M - 1 || chk.getUTCDate() !== D || Y < 2000) return json({ error: 'bad_date' }, 400);
+                if (wanted > cairoDay()) return json({ error: 'future_date' }, 400);
+                const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Cairo', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(row.ts)).map((p) => [p.type, p.value]));
+                const local = Date.UTC(Y, M - 1, D, Number(parts.hour), Number(parts.minute), Number(parts.second));
+                const offAt = (t) => { const p = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(t)).map((x) => [x.type, x.value])); return Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day), Number(p.hour), Number(p.minute), Number(p.second)) - t; };
+                let t = local - offAt(local);
+                t = local - offAt(t);
+                ts = new Date(t).toISOString();
+                day = wanted;
+            }
+            stmts = [
+                env.POS_DB.prepare('UPDATE supplier_payments SET amount = ?, note = ?, ts = ?, day = ? WHERE id = ? AND amount = ? AND supplier_id = ? AND ROUND((SELECT balance FROM suppliers WHERE id = ?) + ?, 2) >= 0').bind(amount, note, ts, day, id, expected, row.supplier_id, row.supplier_id, delta),
+                env.POS_DB.prepare('UPDATE suppliers SET balance = ROUND(balance + ?, 2) WHERE id = ? AND changes() = 1').bind(delta, row.supplier_id),
+            ];
+        } else {
+            stmts = [
+                env.POS_DB.prepare('DELETE FROM supplier_payments WHERE id = ? AND amount = ? AND supplier_id = ?').bind(id, expected, row.supplier_id),
+                env.POS_DB.prepare('UPDATE suppliers SET balance = ROUND(balance + ?, 2) WHERE id = ? AND changes() = 1').bind(expected, row.supplier_id),
+            ];
+        }
+        const rs = await env.POS_DB.batch(stmts);
+        if (!(rs?.[0]?.meta?.changes > 0) || !(rs?.[1]?.meta?.changes > 0)) return json({ error: 'changed' }, 409);
+        const after = await env.POS_DB.prepare('SELECT balance FROM suppliers WHERE id = ?').bind(row.supplier_id).first();
+        return json({ ok: true, balance: after?.balance ?? 0 });
+    }
     if (path.startsWith('/api/pos/supplier/') && path.endsWith('/payment') && request.method === 'POST') {
         if (!manager) return json({ error: 'forbidden' }, 403);
         const id = parseInt(path.slice('/api/pos/supplier/'.length, -'/payment'.length), 10) || 0;
