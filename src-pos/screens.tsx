@@ -8,6 +8,8 @@ import { ExportCard, ProfitView } from './ReportsExtra';
 import { Loyalty } from './LoyaltyUI';
 import { NewSupplierSheet, SupplierSheet } from './PurchasesScreen';
 import GroupsManager, { seedGroups } from './GroupsManager';
+import { UiPrefsCard } from './uiPrefs';
+import { InvoiceCategoriesManager } from './InvoiceCategories';
 
 // تحميل تدريجي: بيعرض أول 40 وبيزود لما المستخدم ينزل
 function MoreSentinel({ shown, total, more }: { shown: number; total: number; more: () => void }) {
@@ -31,42 +33,59 @@ export function InvoicesScreen({ staff, openInvoice, openQuote, notify, initialV
     const [quotes, setQuotes] = useState<Quote[]>([]);
     const [view, setView] = useState<'mine' | 'all' | 'quotes'>(initialView || 'mine');
     const [loading, setLoading] = useState(true);
+    const [search, setSearch] = useState('');
+    const [query, setQuery] = useState('');
+    const [filtersOpen, setFiltersOpen] = useState(false);
+    const [settingsOpen, setSettingsOpen] = useState(false);
+    const requestVersion = useRef(0);
+    const [cats, setCats] = useState<{ id: number; name: string }[]>([]);
+    const [category, setCategory] = useState('');
+    const loadCats = async () => { try { const r = await api('/api/pos/invoice-categories'); setCats(r.categories || []); if (category && category !== 'none' && !(r.categories || []).some((c: any) => String(c.id) === category)) setCategory(''); } catch {} };
+    useEffect(() => { loadCats(); }, []);
+    useEffect(() => { const tm = setTimeout(() => setQuery(search.trim()), 300); return () => clearTimeout(tm); }, [search]);
     const manager = staff.role === 'manager';
 
     const [more, setMore] = useState(false);
     const [loadingMore, setLoadingMore] = useState(false);
     const sentinel = useRef<HTMLDivElement | null>(null);
     const PAGE = 30;
-    const base = () => '/api/pos/invoices?limit=' + PAGE + (manager && view === 'all' ? '&all=1' : '');
-    const ckey = 'inv_' + staff.user + '_' + view;
+    const base = () => '/api/pos/invoices?limit=' + PAGE + (manager && view === 'all' ? '&all=1' : '') + (query ? '&q=' + encodeURIComponent(query) : '') + (category ? '&category=' + encodeURIComponent(category) : '');
+    const ckey = 'inv_' + staff.user + '_' + view; // only the unfiltered first page is cached
 
     const load = async () => {
+        const version = ++requestVersion.current;
+        const c0 = cred();
+        setMore(false);
         if (view === 'quotes') {
             const c = cget<Quote[]>('quotes_' + staff.user); if (c) { setQuotes(c); setLoading(false); } else setLoading(true);
         } else {
-            const c = cget<Invoice[]>(ckey); if (c) { setList(c); setLoading(false); } else setLoading(true);
+            const c = query || category ? null : cget<Invoice[]>(ckey); if (c) { setList(c); setLoading(false); } else { setLoading(true); setList([]); }
         }
         try {
             if (view === 'quotes') {
                 const r = await api('/api/pos/quotes' + (manager ? '?all=1' : ''));
+                if (version !== requestVersion.current || c0 !== cred()) return;
                 setQuotes(r.quotes || []); cset('quotes_' + staff.user, (r.quotes || []).slice(0, 60));
             } else {
                 const r = await api(base());
-                setList(r.invoices || []); setMore(!!r.more); cset(ckey, (r.invoices || []).slice(0, PAGE));
+                if (version !== requestVersion.current || c0 !== cred()) return;
+                setList(r.invoices || []); setMore(!!r.more); if (!query && !category) csetIf(ckey, (r.invoices || []).slice(0, PAGE), c0);
             }
-        } catch { notify('مشكلة في التحميل', true); }
-        setLoading(false);
+        } catch { if (version === requestVersion.current) notify('مشكلة في التحميل', true); }
+        if (version === requestVersion.current) setLoading(false);
     };
-    useEffect(() => { load(); }, [view]);
+    useEffect(() => { load(); return () => { requestVersion.current++; }; }, [view, query, category]);
 
+    useEffect(() => { const f = () => load(); window.addEventListener('invoice-category-changed', f); return () => window.removeEventListener('invoice-category-changed', f); }, [view, query, category]);
     const loadMore = async () => {
         if (loadingMore || !more || !list.length) return;
         setLoadingMore(true);
+        const version = requestVersion.current;
         try {
             const r = await api(base() + '&before=' + list[list.length - 1].id);
+            if (version !== requestVersion.current) return;
             setList((l) => [...l, ...(r.invoices || [])]); setMore(!!r.more);
-        } catch {}
-        setLoadingMore(false);
+        } catch {} finally { setLoadingMore(false); }
     };
     useEffect(() => {
         const el = sentinel.current; if (!el || !more) return;
@@ -78,11 +97,35 @@ export function InvoicesScreen({ staff, openInvoice, openQuote, notify, initialV
 
     return (
         <>
-            <div className="pay-toggle" style={{ marginBottom: 12 }}>
-                <button className={view === 'mine' ? 'on' : ''} onClick={() => setView('mine')}>فواتيري</button>
-                {manager ? <button className={view === 'all' ? 'on' : ''} onClick={() => setView('all')}>كل الفواتير</button> : null}
-                <button className={view === 'quotes' ? 'on' : ''} onClick={() => setView('quotes')}>💾 عروض الأسعار</button>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+                <div className="pay-toggle" style={{ flex: 1, minWidth: 0 }}>
+                    <button className={view !== 'quotes' ? 'on' : ''} onClick={() => setView(manager && view === 'all' ? 'all' : 'mine')}>{view === 'all' ? 'الفواتير' : 'فواتيري'}</button>
+                    <button className={view === 'quotes' ? 'on' : ''} onClick={() => setView('quotes')}>عروض الأسعار</button>
+                </div>
+                {manager ? <button className="btn btn-ghost" aria-label="إعدادات الفواتير" style={{ flex: 'none', minWidth: 46, padding: '0 10px', fontSize: 20 }} onClick={() => setSettingsOpen(true)}>⚙️</button> : null}
             </div>
+            {view !== 'quotes' ? <>
+                <div className="search-box" style={{ display: 'flex', alignItems: 'center', minWidth: 0, marginBottom: 10 }}>
+                    <button className="btn btn-ghost" aria-expanded={filtersOpen} style={{ flex: 'none', padding: '9px 10px' }} onClick={() => setFiltersOpen((v) => !v)}>التصنيفات ▾</button>
+                    <input aria-label="بحث الفواتير" placeholder="رقم الفاتورة، العميل أو الموظف…" value={search} onChange={(e) => setSearch(e.target.value)} style={{ flex: 1, minWidth: 0, width: 0, border: 0, background: 'transparent', padding: '12px 6px', fontSize: 15 }} />
+                </div>
+                {filtersOpen ? <div className="inv-filter-menu" style={{ marginBottom: 10 }}>
+                    <button className={view === 'mine' ? 'on' : ''} onClick={() => { setView('mine'); setFiltersOpen(false); }}>فواتيري</button>
+                    {manager ? <button className={view === 'all' ? 'on' : ''} onClick={() => { setView('all'); setFiltersOpen(false); }}>كل الموظفين</button> : null}
+                    <div style={{ borderTop: '1px solid var(--line)', marginTop: 6, paddingTop: 6 }}>
+                        <button onClick={() => { setCategory(''); setFiltersOpen(false); }}>كل التصنيفات</button>
+                        <button onClick={() => { setCategory('none'); setFiltersOpen(false); }}>بدون تصنيف</button>
+                        {cats.map((c) => <button key={c.id} onClick={() => { setCategory(String(c.id)); setFiltersOpen(false); }}>{c.name}</button>)}
+                    </div>
+                </div> : null}
+                {(category || view === 'all') ? <div style={{ fontSize: 12, color: 'var(--muted)', margin: '-3px 0 8px' }}>{view === 'all' ? 'كل الموظفين' : 'فواتيري'} · {category === 'none' ? 'بدون تصنيف' : cats.find((c) => String(c.id) === category)?.name || 'كل التصنيفات'}</div> : null}
+            </> : null}
+            {settingsOpen && manager ? <>
+                <div className="sheet-back" onClick={() => setSettingsOpen(false)} />
+                <div className="sheet"><div className="sheet-h"><h3>إعدادات الفواتير</h3><button className="btn btn-ghost btn-sm" style={{ marginInlineStart: 'auto' }} onClick={() => setSettingsOpen(false)}>قفل</button></div>
+                    <div className="sheet-b"><InvoiceCategoriesManager notify={notify} onChanged={() => { loadCats(); load(); }} /><UiPrefsCard notify={notify} /></div>
+                </div>
+            </> : null}
             {view === 'quotes' && startQuote ? <button className="btn btn-amber btn-block" style={{ marginBottom: 10 }} onClick={startQuote}>➕ إضافة عرض سعر</button> : null}
             {view === 'quotes' ? (
                 loading ? <div className="empty">جاري التحميل…</div> : quotes.length === 0 ? <div className="empty">مفيش عروض أسعار لسه — اضغط «إضافة عرض سعر»</div> : quotes.map((q) => (

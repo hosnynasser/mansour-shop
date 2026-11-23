@@ -576,10 +576,18 @@ async function handlePos(request, env, path, ctx) {
         const url = new URL(request.url);
         const date = clean(url.searchParams.get('date'), 10); // YYYY-MM-DD (يوم القاهرة بيتحسب في الواجهة)
         const all = manager && url.searchParams.get('all') === '1';
-        let sql = "SELECT id, num, ts, staff, payment, subtotal, discount, total, status, customer_name, customer_phone FROM invoices WHERE status != 'pending'";
+        let sql = "SELECT id, num, ts, staff, payment, subtotal, discount, total, status, customer_name, customer_phone, category_id FROM invoices WHERE status != 'pending'";
         const args = [];
         if (!manager || !all) { sql += ' AND staff = ?'; args.push(staff.user); }
         if (date) { sql += ' AND day = ?'; args.push(date); }
+        const query = clean(url.searchParams.get('q'), 100);
+        if (query) {
+            sql += " AND (instr(lower(COALESCE(num, '')), lower(?)) > 0 OR instr(lower(COALESCE(customer_name, '')), lower(?)) > 0 OR instr(lower(COALESCE(staff, '')), lower(?)) > 0)";
+            args.push(query, query, query);
+        }
+        const category = url.searchParams.get('category');
+        if (category === 'none') sql += ' AND category_id IS NULL';
+        else if (Number(category) > 0) { sql += ' AND category_id = ?'; args.push(Number(category)); }
         const lim = parseInt(url.searchParams.get('limit') || '', 10);
         const pageSize = lim > 0 ? Math.min(lim, 100) : 200;
         const before = parseInt(url.searchParams.get('before') || '', 10);
@@ -589,6 +597,54 @@ async function handlePos(request, env, path, ctx) {
         const rows = results || [];
         const more = rows.length > pageSize;
         return json({ invoices: more ? rows.slice(0, pageSize) : rows, more });
+    }
+
+    // تصنيفات الفواتير الاختيارية. لا تلمس الحساب أو المخزون.
+    if (path === '/api/pos/invoice-categories' && request.method === 'GET') {
+        const { results } = await env.POS_DB.prepare('SELECT id, name FROM invoice_categories ORDER BY name').all();
+        return json({ categories: results || [] });
+    }
+    if (path === '/api/pos/invoice-categories' && request.method === 'POST') {
+        if (!manager) return json({ error: 'forbidden' }, 403);
+        let b; try { b = await request.json(); } catch { return json({ error: 'bad_json' }, 400); }
+        const name = clean(b.name, 40).trim();
+        if (!name) return json({ error: 'bad_name' }, 400);
+        const found = await env.POS_DB.prepare('SELECT id FROM invoice_categories WHERE name = ?').bind(name).first();
+        if (found) return json({ error: 'exists' }, 409);
+        try { await env.POS_DB.prepare('INSERT INTO invoice_categories (name) VALUES (?)').bind(name).run(); }
+        catch { return json({ error: 'exists' }, 409); }
+        return json({ ok: true });
+    }
+    if (path === '/api/pos/invoice-categories/rename' && request.method === 'POST') {
+        if (!manager) return json({ error: 'forbidden' }, 403);
+        let b; try { b = await request.json(); } catch { return json({ error: 'bad_json' }, 400); }
+        const id = Number(b.id) || 0, name = clean(b.name, 40).trim();
+        if (!id || !name) return json({ error: 'bad_name' }, 400);
+        const exists = await env.POS_DB.prepare('SELECT id FROM invoice_categories WHERE id = ?').bind(id).first();
+        if (!exists) return json({ error: 'not_found' }, 404);
+        try { await env.POS_DB.prepare('UPDATE invoice_categories SET name = ? WHERE id = ?').bind(name, id).run(); }
+        catch { return json({ error: 'exists' }, 409); }
+        return json({ ok: true });
+    }
+    if (path === '/api/pos/invoice-categories/delete' && request.method === 'POST') {
+        if (!manager) return json({ error: 'forbidden' }, 403);
+        let b; try { b = await request.json(); } catch { return json({ error: 'bad_json' }, 400); }
+        const id = Number(b.id) || 0;
+        await env.POS_DB.batch([
+            env.POS_DB.prepare('UPDATE invoices SET category_id = NULL WHERE category_id = ?').bind(id),
+            env.POS_DB.prepare('DELETE FROM invoice_categories WHERE id = ?').bind(id),
+        ]);
+        return json({ ok: true });
+    }
+    if (/^\/api\/pos\/invoice\/\d+\/category$/.test(path) && request.method === 'POST') {
+        if (!manager) return json({ error: 'forbidden' }, 403);
+        const id = Number(path.split('/')[4]);
+        let b; try { b = await request.json(); } catch { return json({ error: 'bad_json' }, 400); }
+        const cat = Number(b.category_id) || null;
+        // EXISTS داخل نفس الجملة يمنع ربط تصنيف اتحذف أثناء الطلب
+        const r = await env.POS_DB.prepare("UPDATE invoices SET category_id = ? WHERE id = ? AND status != 'pending' AND (? IS NULL OR EXISTS (SELECT 1 FROM invoice_categories WHERE id = ?))").bind(cat, id, cat, cat).run();
+        if (!r.meta.changes) return json({ error: 'changed' }, 409);
+        return json({ ok: true, category_id: cat });
     }
 
     // فاتورة واحدة بالأصناف

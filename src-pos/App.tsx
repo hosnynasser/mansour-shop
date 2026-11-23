@@ -12,6 +12,7 @@ import Icon from './Icon';
 import SharePdf from './SharePdf';
 import BtPrint from './BtPrint';
 import { UiPrefsCard, loadUiPrefs, useUiPrefs } from './uiPrefs';
+import { InvoiceCategoryPicker } from './InvoiceCategories';
 import logo from '../src/photos/logo-mansour.png';
 
 function SettingsArea({ sub, setSub, staff, manager, chqAlerts, notify, categories, products, refresh, onChequesChanged, onLogout }: {
@@ -446,6 +447,7 @@ export default function App() {
                             <div className="close-line"><span>التاريخ</span><b>{fmtTime(detail.inv.ts)}</b></div>
                             <div className="close-line"><span>الموظف</span><b>{detail.inv.staff}</b></div>
                             <div className="close-line"><span>الدفع</span><b>{paymentLabel(detail.inv.payment)}</b></div>
+                            {manager ? <InvoiceCategoryPicker invoiceId={detail.inv.id} categoryId={detail.inv.category_id} notify={notify} onChanged={(id) => setDetail((d) => d ? { ...d, inv: { ...d.inv, category_id: id } } : null)} /> : null}
                             {detail.inv.customer_name ? <div className="close-line"><span>العميل</span><b>{detail.inv.customer_name}</b></div> : null}
                             <div style={{ margin: '10px 0' }}>
                                 {detail.items.map((it, i) => (

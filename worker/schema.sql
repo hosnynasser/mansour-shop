@@ -173,3 +173,7 @@ CREATE TABLE IF NOT EXISTS grp_defs (section TEXT NOT NULL, name TEXT NOT NULL, 
 CREATE INDEX IF NOT EXISTS idx_invoices_customer ON invoices(customer_id, id);
 CREATE INDEX IF NOT EXISTS idx_purchases_supplier ON purchases(supplier_id, ts, id);
 CREATE INDEX IF NOT EXISTS idx_suppay_supplier ON supplier_payments(supplier_id, ts, id);
+
+CREATE TABLE IF NOT EXISTS invoice_categories (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE);
+ALTER TABLE invoices ADD COLUMN category_id INTEGER;
+CREATE INDEX IF NOT EXISTS idx_invoice_category ON invoices(category_id, id);
