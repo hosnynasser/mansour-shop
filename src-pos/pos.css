@@ -332,3 +332,4 @@ html.dd-lock,html.dd-lock body,html.dd-lock #root,html.dd-lock .pos-main{overflo
 
 @keyframes spinDot{to{transform:rotate(360deg)}}
 .spin-dot{position:absolute;top:6px;left:6px;width:12px;height:12px;border:2px solid var(--muted);border-top-color:transparent;border-radius:50%;animation:spinDot .8s linear infinite;opacity:.7}
+.spin-inl{display:inline-block;width:11px;height:11px;border:2px solid var(--muted);border-top-color:transparent;border-radius:50%;animation:spinDot .8s linear infinite;opacity:.7}

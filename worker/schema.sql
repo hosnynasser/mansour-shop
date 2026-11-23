@@ -170,3 +170,6 @@ ALTER TABLE suppliers ADD COLUMN grp TEXT;
 
 -- empty groups (created by the owner before any member is in them)
 CREATE TABLE IF NOT EXISTS grp_defs (section TEXT NOT NULL, name TEXT NOT NULL, PRIMARY KEY (section, name));
+CREATE INDEX IF NOT EXISTS idx_invoices_customer ON invoices(customer_id, id);
+CREATE INDEX IF NOT EXISTS idx_purchases_supplier ON purchases(supplier_id, ts, id);
+CREATE INDEX IF NOT EXISTS idx_suppay_supplier ON supplier_payments(supplier_id, ts, id);

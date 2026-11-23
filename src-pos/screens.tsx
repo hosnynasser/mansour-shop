@@ -1,6 +1,6 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import PN from './Bidi';
-import { api, apiT, cget, cset, csetIf, cred, cairoToday, fmt, fmtTime, paymentLabel, Customer, Expense, Invoice, LedgerEntry, Product, Quote, Report, Role, Staff } from './lib';
+import { api, apiT, cget, cset, csetIf, cred, hget, hset, hdel, cairoToday, fmt, fmtTime, paymentLabel, Customer, Expense, Invoice, LedgerEntry, Product, Quote, Report, Role, Staff } from './lib';
 import Icon from './Icon';
 import CatChips from './CatChips';
 import ScannerModal from './ScannerModal';
@@ -126,7 +126,25 @@ function SuppliersPane({ notify, reloadKey }: { notify: (m: string, b?: boolean)
     const loadDefs = async () => { try { const r = await api('/api/pos/groups?section=suppliers'); setDefGroups((r.groups || []).map((g: any) => g.name)); } catch { /* بنكمل بمجموعات الأعضاء */ } };
     useEffect(() => { load(); loadDefs(); }, []);
     useEffect(() => { if (reloadKey) { load(); loadDefs(); } }, [reloadKey]);
-    const open = async (id: number) => { try { const r = await api('/api/pos/supplier/' + id); setDet({ s: r.supplier, purchases: r.purchases || [], payments: r.payments || [] }); } catch { notify('مشكلة في فتح المورد', true); } };
+    const reqS = useRef(0);
+    const open = async (id: number) => {
+        const my = ++reqS.current;
+        const c0 = cred();
+        const row = (list || []).find((x) => x.id === id);
+        const hc = row ? hget('s', id) : null;
+        // الشاشة تفتح فوراً بالاسم والرصيد من القايمة، والحركات المحفوظة (لو فيه) بعلامة "محفوظة" لحد ما الرد الجديد يوصل
+        if (row) setDet({ s: row, purchases: hc ? hc.purchases || [] : [], payments: hc ? hc.payments || [] : [], st: hc ? 'stale' : 'loading' });
+        try {
+            const r = await api('/api/pos/supplier/' + id);
+            if (reqS.current !== my) return;
+            setDet({ s: r.supplier, purchases: r.purchases || [], payments: r.payments || [] });
+            hset('s', id, { purchases: r.purchases || [], payments: r.payments || [] }, c0);
+        } catch {
+            if (reqS.current !== my) return;
+            if (row) setDet({ s: row, purchases: hc ? hc.purchases || [] : [], payments: hc ? hc.payments || [] : [], st: hc ? 'stale-err' : 'err' });
+            else notify('مشكلة في فتح المورد', true);
+        }
+    };
     const all = list || [];
     const groups = useMemo(() => Array.from(new Set([...all.map((x) => (x.grp || '').trim()), ...defGroups].filter(Boolean))).sort() as string[], [list, defGroups]);
     useEffect(() => { if (grpSel && grpSel !== '__none' && !groups.includes(grpSel)) setGrpSel(''); }, [groups, grpSel]);
@@ -174,7 +192,7 @@ function SuppliersPane({ notify, reloadKey }: { notify: (m: string, b?: boolean)
             <div style={{ height: 70 }} />
             <button className="fab-add" onClick={() => setNewOpen(true)}><Icon n="plus" size={20} /> إضافة مورد</button>
             {newOpen ? <NewSupplierSheet groups={groups} onClose={() => setNewOpen(false)} onDone={() => { setNewOpen(false); load(); notify('اتضاف المورد ✓'); }} notify={notify} /> : null}
-            {det ? <SupplierSheet groups={groups} data={det} onClose={() => setDet(null)} onChanged={() => { setDet(null); load(); }} onReload={load} notify={notify} /> : null}
+            {det ? <SupplierSheet groups={groups} data={det} onClose={() => { reqS.current++; setDet(null); }} onChanged={() => { reqS.current++; setDet(null); load(); }} onReload={load} notify={notify} /> : null}
         </>
     );
 }
@@ -608,7 +626,7 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
     const [name, setName] = useState('');
     const [phone, setPhone] = useState('');
     const [busy, setBusy] = useState(false);
-    const [detail, setDetail] = useState<{ customer: Customer; ledger: LedgerEntry[]; balance: number; invoices: any[]; points?: number; pointsLog?: any[]; loyalty?: Loyalty; loading?: boolean; err?: boolean } | null>(null);
+    const [detail, setDetail] = useState<{ customer: Customer; ledger: LedgerEntry[]; balance: number; invoices: any[]; points?: number; pointsLog?: any[]; loyalty?: Loyalty; loading?: boolean; err?: boolean; stale?: boolean } | null>(null);
     const reqRef = useRef(0);
     const inflight = useRef(false);
     const keys = useRef<Record<string, { sig: string; key: string }>>({});
@@ -656,24 +674,30 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
         const row = list.find((c) => c.id === id);
         const my = ++reqRef.current;
         setPayAmt(''); setEditMode(false); setDebtOpen(false); setDebtAmt(''); setDebtNote('');
-        if (row) setDetail({ customer: { ...row, phone: row.phone || '', notes: row.notes || '' } as Customer, ledger: [], balance: row.balance || 0, invoices: [], loading: true });
+        const c0 = cred();
+        // آخر حركات اتفتحت قبل كده بتظهر فوراً بعلامة "محفوظة" لحد ما الرد الجديد يوصل. الرصيد من القايمة، والتعديل والتسجيل مقفولين لحد التحديث
+        const hc = row ? hget('c', id) : null;
+        if (row) setDetail({ customer: { ...row, phone: row.phone || '', notes: row.notes || '' } as Customer, ledger: hc ? hc.ledger || [] : [], balance: row.balance || 0, invoices: hc ? hc.invoices || [] : [], loading: !hc, stale: !!hc });
         const pending = dcache.current.get(id);
         dcache.current.delete(id);
         try {
             const r = (pending ? await pending : null) || await apiT('/api/pos/customer/' + id);
             if (reqRef.current !== my) return;
             setDetail(r);
+            hset('c', id, { ledger: r.ledger || [], invoices: r.invoices || [] }, c0);
         } catch {
             if (reqRef.current !== my) return;
             // الكارت يفضل ظاهر بالرصيد من القايمة، وقسم الحركات يعرض خطأ وزر "جرّب تاني" بدل دايرة للأبد
-            if (row) setDetail({ customer: { ...row, phone: row.phone || '', notes: row.notes || '' } as Customer, ledger: [], balance: row.balance || 0, invoices: [], loading: false, err: true });
+            if (row) setDetail({ customer: { ...row, phone: row.phone || '', notes: row.notes || '' } as Customer, ledger: hc ? hc.ledger || [] : [], balance: row.balance || 0, invoices: hc ? hc.invoices || [] : [], loading: false, err: true, stale: !!hc });
             else { setDetail(null); notify('مشكلة في فتح العميل', true); }
         }
     };
     // لو الكارت اتقفل قبل ما الرد يوصل، الرد المتأخر يتتجاهل (ما يفتحش الكارت تاني)
     useEffect(() => { if (!detail) reqRef.current++; }, [detail]);
     const refreshDetail = async (id: number) => {
-        try { const r = await api('/api/pos/customer/' + id); setDetail(r); } catch {}
+        const c0 = cred();
+        hdel('c', id);
+        try { const r = await api('/api/pos/customer/' + id); setDetail(r); hset('c', id, { ledger: r.ledger || [], invoices: r.invoices || [] }, c0); } catch {}
         load();
     };
 
@@ -696,6 +720,7 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
         inflight.current = true;
         setBusy(true);
         try {
+            hdel('c', detail.customer.id);
             await api(`/api/pos/customer/${detail.customer.id}/payment`, 'POST', { amount: amt, method: payMethod, key: keyFor('pay', `${detail.customer.id}|${amt}|${payMethod}`) });
             delete keys.current.pay;
             notify('اتسجلت الدفعة ✓'); setPayAmt(''); setPayOpen(false);
@@ -717,6 +742,7 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
         if (!detail || !confirm('متأكد إنك عايز تمسح العميل ده؟')) return;
         try {
             await api('/api/pos/customers?id=' + detail.customer.id, 'DELETE');
+            hdel('c', detail.customer.id);
             setDetail(null); notify('اتمسح ✓'); load();
         } catch (e: any) { notify(e?.data?.error === 'has_ledger' ? 'العميل عليه حساب، مينفعش يتمسح' : 'مشكلة في المسح', true); }
     };
@@ -728,6 +754,7 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
         inflight.current = true;
         setBusy(true);
         try {
+            hdel('c', detail.customer.id);
             await api(`/api/pos/customer/${detail.customer.id}/debt`, 'POST', { amount: amt, note: debtNote.trim(), key: keyFor('debt', `${detail.customer.id}|${amt}|${debtNote.trim()}`) });
             delete keys.current.debt;
             notify('اتسجلت المديونية ✓'); setDebtAmt(''); setDebtNote(''); setDebtOpen(false);
@@ -738,7 +765,7 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
     };
     const delPayment = async (id: number) => {
         if (!detail || !confirm('تمسح القيد ده؟ هيتعدّل رصيد العميل.')) return false;
-        try { await api('/api/pos/ledger/' + id, 'DELETE'); refreshDetail(detail.customer.id); notify('اتمسح القيد ✓'); return true; }
+        try { hdel('c', detail.customer.id); await api('/api/pos/ledger/' + id, 'DELETE'); refreshDetail(detail.customer.id); notify('اتمسح القيد ✓'); return true; }
         catch { notify('مشكلة في المسح', true); return false; }
     };
     const [txSel, setTxSel] = useState<any>(null);
@@ -758,6 +785,7 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
         setEBusy(true);
         try {
             const orig = (() => { try { return new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(txSel.ts)); } catch { return ''; } })();
+            hdel('c', detail.customer.id);
             await api('/api/pos/ledger/' + txSel.id + '/edit', 'POST', { amount: amt, note: eNote.trim(), expected: { amount: txSel.amount, ts: txSel.ts, note: txSel.note || '' }, ...(eDate !== orig ? { date: eDate } : {}) });
             notify('اتعدّل القيد ✓');
             closeTx();
@@ -854,7 +882,7 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
                         <div className="sheet-h">
                             <button className="btn btn-ghost btn-sm back-chev" aria-label="رجوع" onClick={() => setDetail(null)}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M9 5l7 7-7 7" /></svg></button>
                             <h3 className="cd-title">{detail.customer.name}<small>{detail.customer.phone || 'بدون تليفون'}</small></h3>
-                            {manager && !editMode && !(detail.loading || detail.err) ? (
+                            {manager && !editMode && !(detail.loading || detail.err || detail.stale) ? (
                                 <button className="btn btn-ghost btn-sm" style={{ marginInlineStart: 'auto' }} aria-expanded={setOpen} onClick={() => setSetOpen((v) => !v)}>⚙️ إعدادات</button>
                             ) : (
                                 <button className="btn btn-ghost btn-sm" style={{ marginInlineStart: 'auto' }} onClick={() => setDetail(null)}>قفل</button>
@@ -889,7 +917,7 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
                                 </>
                             )}
 
-                            {debtOpen && manager && !editMode && !(detail.loading || detail.err) ? (
+                            {debtOpen && manager && !editMode && !(detail.loading || detail.err || detail.stale) ? (
                                 <div className="close-card">
                                     <h4>إضافة دين</h4>
                                     <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 8 }}>بتتسجل في كشف الحساب كرصيد سابق من غير فاتورة، ومش بتدخل في المبيعات.</div>
@@ -902,11 +930,11 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
                                 </div>
                             ) : null}
 
-                            {payOpen && detail.balance <= 0 && !editMode && !(detail.loading || detail.err) ? (
+                            {payOpen && detail.balance <= 0 && !editMode && !(detail.loading || detail.err || detail.stale) ? (
                                 <div className="close-card"><h4>💵 تسجيل دفعة</h4><div style={{ fontSize: 13, color: 'var(--muted)' }}>مفيش دين على العميل دلوقتي. لو عليه فلوس قديمة، {manager ? 'اضغط «إضافة دين» الأول.' : 'المدير يسجلها الأول.'}</div></div>
                             ) : null}
 
-                            {payOpen && detail.balance > 0 && !editMode && !(detail.loading || detail.err) ? (
+                            {payOpen && detail.balance > 0 && !editMode && !(detail.loading || detail.err || detail.stale) ? (
                                 <div className="close-card">
                                     <h4>💵 تسجيل دفعة (بتتخصم من الدين)</h4>
                                     <div className="field"><input inputMode="decimal" placeholder="المبلغ" value={payAmt} onChange={(e) => setPayAmt(e.target.value)} /></div>
@@ -922,8 +950,11 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
                                 </div>
                             ) : null}
 
-                            <h4 className="tx-title">معاملات{!(detail.loading || detail.err) ? ' (' + detail.ledger.length + ')' : ''}</h4>
-                            {detail.err ? <div className="empty" style={{ padding: 16 }}>ماقدرناش نحمّل الحركات. الرصيد الظاهر من القايمة.<div style={{ marginTop: 10 }}><button className="btn btn-blue btn-sm" onClick={() => openDetail(detail.customer.id)}>جرّب تاني</button></div></div> : detail.loading ? <div className="empty" style={{ padding: 16 }}>جاري تحميل الحركات…</div> : detail.ledger.length === 0 ? <div className="empty" style={{ padding: 16 }}>مفيش حركات</div> : (() => {
+                            <h4 className="tx-title">معاملات{!(detail.loading || detail.err || detail.stale) ? ' (' + detail.ledger.length + ')' : ''}</h4>
+                            {detail.stale ? (detail.err
+                                ? <div style={{ fontSize: 12, color: 'var(--danger)', margin: '0 0 8px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>فشل التحديث، الحركات دي من آخر مرة ومش محدّثة<button className="btn btn-blue btn-sm" onClick={() => openDetail(detail.customer.id)}>جرّب تاني</button></div>
+                                : <div role="status" style={{ fontSize: 12, color: 'var(--muted)', margin: '0 0 8px', display: 'flex', alignItems: 'center', gap: 6 }}><span className="spin-inl" />محفوظة · بيتحدّث</div>) : null}
+                            {detail.err && !detail.stale ? <div className="empty" style={{ padding: 16 }}>ماقدرناش نحمّل الحركات. الرصيد الظاهر من القايمة.<div style={{ marginTop: 10 }}><button className="btn btn-blue btn-sm" onClick={() => openDetail(detail.customer.id)}>جرّب تاني</button></div></div> : detail.loading ? <div className="empty" style={{ padding: 16 }}>جاري تحميل الحركات…</div> : detail.ledger.length === 0 ? <div className="empty" style={{ padding: 16 }}>مفيش حركات</div> : (() => {
                                 let run = Math.round((detail.balance || 0) * 100) / 100;
                                 return detail.ledger.map((l: any) => {
                                     const after = run;
@@ -931,13 +962,13 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
                                     const isCharge = l.kind === 'charge';
                                     const label = isCharge ? (l.invoice_id ? 'فاتورة آجل' : 'دين') : 'دفعة';
                                     return (
-                                        <div className="tx-row" key={l.id} role="button" tabIndex={0} style={{ cursor: 'pointer' }} onClick={() => { setTxSel({ ...l, after }); setTxEdit(false); }}>
+                                        <div className="tx-row" key={l.id} role={detail.stale ? undefined : 'button'} tabIndex={detail.stale ? undefined : 0} style={{ cursor: detail.stale ? 'default' : 'pointer' }} onClick={detail.stale ? undefined : () => { setTxSel({ ...l, after }); setTxEdit(false); }}>
                                             <span className={'tx-ic ' + (isCharge ? 'up' : 'down')} aria-hidden="true">
                                                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">{isCharge ? <><path d="M12 19V5" /><path d="M6 11l6-6 6 6" /></> : <><path d="M12 5v14" /><path d="M6 13l6 6 6-6" /></>}</svg>
                                             </span>
                                             <div className="tx-mid">
                                                 <div className="tx-d">{fmtTx(l.ts)}</div>
-                                                <div className="tx-b" style={{ color: after > 0 ? 'var(--danger)' : '#0f7a44' }}>الرصيد بعدها {fmt(Math.abs(after))} ج{after < 0 ? ' (له)' : ''}</div>
+                                                {detail.stale ? null : <div className="tx-b" style={{ color: after > 0 ? 'var(--danger)' : '#0f7a44' }}>الرصيد بعدها {fmt(Math.abs(after))} ج{after < 0 ? ' (له)' : ''}</div>}
                                                 {l.note || l.staff ? <div className="tx-n">{l.note ? l.note + ' · ' : ''}{l.staff}</div> : null}
                                             </div>
                                             <div className="tx-amt">
@@ -965,7 +996,7 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
                                 </>
                             ) : null}
                         </div>
-                        {!editMode && !(detail.loading || detail.err) ? (
+                        {!editMode && !(detail.loading || detail.err || detail.stale) ? (
                             <div className="detail-bar">
                                 {manager ? <button className="btn db-debt" onClick={() => { setDebtOpen((v) => !v); setPayOpen(false); document.querySelector('.sheet.tall .sheet-b')?.scrollTo({ top: 0, behavior: 'smooth' }); }}>+ إضافة دين</button> : null}
                                 <button className="btn db-pay" onClick={() => { setPayOpen((v) => !v); setDebtOpen(false); document.querySelector('.sheet.tall .sheet-b')?.scrollTo({ top: 0, behavior: 'smooth' }); }}>تسجيل دفعة</button>

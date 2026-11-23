@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import PN from './Bidi';
 import ChequesPanel from './ChequesScreen';
-import { api, fmt, fmtTime, Product, Purchase, PurchaseItem, Supplier } from './lib';
+import { api, cred, hdel, hset, fmt, fmtTime, Product, Purchase, PurchaseItem, Supplier } from './lib';
 
 type Line = { code: string; qty: string; cost: string };
 
@@ -163,9 +163,12 @@ function fmtTxS(ts: string) {
     } catch { return fmtTime(ts); }
 }
 
-export function SupplierSheet({ data, onClose, onChanged, onReload, notify, groups }: { groups?: string[]; data: { s: Supplier; purchases: Purchase[]; payments?: any[] }; onClose: () => void; onChanged: () => void; onReload?: () => void; notify: (m: string, b?: boolean) => void }) {
+export function SupplierSheet({ data, onClose, onChanged, onReload, notify, groups }: { groups?: string[]; data: { s: Supplier; purchases: Purchase[]; payments?: any[]; st?: string }; onClose: () => void; onChanged: () => void; onReload?: () => void; notify: (m: string, b?: boolean) => void }) {
     const [d, setD] = useState(data);
+    useEffect(() => { setD(data); setG(data.s.grp || ''); }, [data]);
     const { s, purchases } = d;
+    // الحركات المحفوظة (أو اللي لسه بتتحمّل) مش بتتعامل كإنها حالية: التسجيل والتعديل مقفولين والرصيد بعد كل حركة مخفي لحد ما التحديث يوصل
+    const hold = !!d.st;
     const payments = d.payments || [];
     const [amount, setAmount] = useState('');
     const [busy, setBusy] = useState(false);
@@ -180,11 +183,15 @@ export function SupplierSheet({ data, onClose, onChanged, onReload, notify, grou
     const [eNote, setENote] = useState('');
     const [eBusy, setEBusy] = useState(false);
     const reload = async () => {
+        const c0 = cred();
+        hdel('s', s.id);
         const r = await api('/api/pos/supplier/' + s.id);
         setD({ s: r.supplier, purchases: r.purchases || [], payments: r.payments || [] });
+        hset('s', s.id, { purchases: r.purchases || [], payments: r.payments || [] }, c0);
         setG(r.supplier.grp || '');
         if (onReload) onReload();
     };
+    const retry = async () => { try { await reload(); } catch { notify('فشل التحديث', true); } };
     const saveGrp = async () => {
         setGBusy(true);
         try { await api('/api/pos/supplier/' + s.id, 'PATCH', { name: s.name, phone: s.phone || '', notes: s.notes || '', grp: g.trim() }); notify('اتحفظت المجموعة ✓'); await reload(); setSetOpen(false); }
@@ -196,6 +203,7 @@ export function SupplierSheet({ data, onClose, onChanged, onReload, notify, grou
         if (a <= 0 || busy) return;
         setBusy(true);
         try {
+            hdel('s', s.id);
             const r = await api(`/api/pos/supplier/${s.id}/payment`, 'POST', { amount: a });
             notify('اتسجلت الدفعة ✓ — المتبقي ' + fmt(r.balance) + ' ج');
             setAmount(''); setPayOpen(false);
@@ -220,6 +228,7 @@ export function SupplierSheet({ data, onClose, onChanged, onReload, notify, grou
         if (!confirm('تعدّل الدفعة؟ المبلغ من ' + fmt(txSel.p.amount) + ' ج إلى ' + fmt(amt) + ' ج، ورصيد المورد هيتعدّل بالفرق.')) return;
         setEBusy(true);
         try {
+            hdel('s', s.id);
             await api('/api/pos/supplier-payment/' + txSel.id + '/edit', 'POST', { expected: txSel.p.amount, expectedTs: txSel.p.ts, expectedNote: txSel.p.note || '', amount: amt, note: eNote.trim(), ...(eDate !== cairoDayOf(txSel.ts) ? { date: eDate } : {}) });
             notify('اتعدّلت الدفعة ✓');
             closeTx();
@@ -232,6 +241,7 @@ export function SupplierSheet({ data, onClose, onChanged, onReload, notify, grou
         if (!confirm('تمسح الدفعة دي؟ المبلغ هيرجع على رصيد المورد.')) return;
         setEBusy(true);
         try {
+            hdel('s', s.id);
             await api('/api/pos/supplier-payment/' + txSel.id + '/delete', 'POST', { expected: txSel.p.amount, expectedTs: txSel.p.ts, expectedNote: txSel.p.note || '' });
             notify('اتمسحت الدفعة ✓');
             closeTx();
@@ -257,7 +267,7 @@ export function SupplierSheet({ data, onClose, onChanged, onReload, notify, grou
         return list.map((x, i) => {
             const tied = (i > 0 && list[i - 1].ts === x.ts) || (i < list.length - 1 && list[i + 1].ts === x.ts);
             const why = chequeNewer ? 'cheque' : tied ? 'tie' : '';
-            const out = { ...x, after: why ? null : run, why };
+            const out = { ...x, after: why || hold ? null : run, why };
             run = Math.round((run - x.effect) * 100) / 100;
             if (x.type === 'payment' && /^صرف شيك/.test(x.p.note || '')) chequeNewer = true;
             return out;
@@ -279,7 +289,7 @@ export function SupplierSheet({ data, onClose, onChanged, onReload, notify, grou
                 <div className="sheet-h">
                     <button className="btn btn-ghost btn-sm back-chev" aria-label="رجوع" onClick={onClose}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M9 5l7 7-7 7" /></svg></button>
                     <h3 className="cd-title">{s.name}<small>{s.phone || 'بدون تليفون'}</small></h3>
-                    <button className="btn btn-ghost btn-sm" style={{ marginInlineStart: 'auto' }} aria-expanded={setOpen} onClick={() => setSetOpen((v) => !v)}>⚙️ إعدادات</button>
+                    <button className="btn btn-ghost btn-sm" style={{ marginInlineStart: 'auto' }} aria-expanded={setOpen} disabled={hold} onClick={() => setSetOpen((v) => !v)}>⚙️ إعدادات</button>
                 </div>
                 <div className="sheet-b">
                     {setOpen ? (
@@ -308,15 +318,17 @@ export function SupplierSheet({ data, onClose, onChanged, onReload, notify, grou
                             </div>
                         </div>
                     ) : null}
-                    <h4 className="tx-title">معاملات ({rows.length})</h4>
-                    {rows.length === 0 ? <div className="empty" style={{ padding: 16 }}>مفيش معاملات لسه</div> : rows.map((x) => {
+                    <h4 className="tx-title">معاملات{hold ? '' : ' (' + rows.length + ')'}</h4>
+                    {d.st === 'stale' ? <div role="status" style={{ fontSize: 12, color: 'var(--muted)', margin: '0 0 8px', display: 'flex', alignItems: 'center', gap: 6 }}><span className="spin-inl" />محفوظة · بيتحدّث</div> : null}
+                    {d.st === 'stale-err' ? <div style={{ fontSize: 12, color: 'var(--danger)', margin: '0 0 8px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>فشل التحديث، الحركات دي من آخر مرة ومش محدّثة<button className="btn btn-blue btn-sm" onClick={retry}>جرّب تاني</button></div> : null}
+                    {d.st === 'loading' ? <div className="empty" style={{ padding: 16 }}>جاري تحميل الحركات…</div> : d.st === 'err' ? <div className="empty" style={{ padding: 16 }}>ماقدرناش نحمّل الحركات. الرصيد الظاهر من القايمة.<div style={{ marginTop: 10 }}><button className="btn btn-blue btn-sm" onClick={retry}>جرّب تاني</button></div></div> : rows.length === 0 ? <div className="empty" style={{ padding: 16 }}>مفيش معاملات لسه</div> : rows.map((x) => {
                         const isP = x.type === 'purchase';
                         return (
-                            <div className="tx-row" key={x.type + x.id} role="button" tabIndex={0} style={{ cursor: 'pointer' }} onClick={() => { setTxSel(x); setTxEdit(false); }}>
+                            <div className="tx-row" key={x.type + x.id} role={hold ? undefined : 'button'} tabIndex={hold ? undefined : 0} style={{ cursor: hold ? 'default' : 'pointer' }} onClick={hold ? undefined : () => { setTxSel(x); setTxEdit(false); }}>
                                 <Arrow up={isP} />
                                 <div className="tx-mid">
                                     <div className="tx-d">{fmtTxS(x.ts)}</div>
-                                    {x.after === null ? <div className="tx-b" style={{ color: 'var(--muted)' }}>الرصيد بعدها: غير متاح</div> : <div className="tx-b" style={{ color: x.after > 0 ? 'var(--danger)' : '#0f7a44' }}>الرصيد بعدها {fmt(Math.abs(x.after))} ج{x.after < 0 ? ' (ليك)' : ''}</div>}
+                                    {hold ? null : x.after === null ? <div className="tx-b" style={{ color: 'var(--muted)' }}>الرصيد بعدها: غير متاح</div> : <div className="tx-b" style={{ color: x.after > 0 ? 'var(--danger)' : '#0f7a44' }}>الرصيد بعدها {fmt(Math.abs(x.after))} ج{x.after < 0 ? ' (ليك)' : ''}</div>}
                                     <div className="tx-n">{isP ? x.p.num : (x.p.note || '')}{!isP && x.p.staff ? (x.p.note ? ' · ' : '') + x.p.staff : ''}</div>
                                 </div>
                                 <div className="tx-amt">
@@ -326,9 +338,9 @@ export function SupplierSheet({ data, onClose, onChanged, onReload, notify, grou
                             </div>
                         );
                     })}
-                    {hasHidden ? <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 8 }}>الرصيد بعد بعض الحركات مش معروض لأنه مش مضمون (صرف شيك بعدها أو حركتين بنفس الوقت). الرصيد الحالي والمبالغ مظبوطين.</div> : null}
+                    {hasHidden && !hold ? <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 8 }}>الرصيد بعد بعض الحركات مش معروض لأنه مش مضمون (صرف شيك بعدها أو حركتين بنفس الوقت). الرصيد الحالي والمبالغ مظبوطين.</div> : null}
                 </div>
-                {owe ? (
+                {owe && !hold ? (
                     <div className="detail-bar">
                         <button className="btn db-pay" onClick={() => setPayOpen((v) => !v)}>تسديد دفعة</button>
                     </div>

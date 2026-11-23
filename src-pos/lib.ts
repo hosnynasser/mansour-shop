@@ -41,6 +41,29 @@ export function cset(k: string, v: unknown) {
 export function csetIf(k: string, v: unknown, c: string) {
     if (cred() === c) cset(k, v);
 }
+// آخر حركات اتفتحت لكل عميل/مورد (للعرض الفوري). مربوطة بحساب الدخول الحالي، وبتتمسح مع clearCache/clearCred، وآخر 20 حساب بس
+function chash(c: string): string { let h = 5381; for (let i = 0; i < c.length; i++) h = ((h << 5) + h + c.charCodeAt(i)) | 0; return String(h); }
+export function hget(kind: 'c' | 's', id: number): any | null {
+    const m = cget<any>('hist_' + kind);
+    if (!m || m.c !== chash(cred())) return null;
+    return (m.items && m.items[id]) || null;
+}
+export function hset(kind: 'c' | 's', id: number, data: Record<string, unknown>, c: string) {
+    if (cred() !== c || !c) return;
+    const h = chash(c);
+    const m0 = cget<any>('hist_' + kind);
+    const m = m0 && m0.c === h ? m0 : { c: h, order: [] as number[], items: {} as Record<string, unknown> };
+    m.items[id] = { ...data, at: Date.now() };
+    m.order = [id, ...m.order.filter((x: number) => x !== id)];
+    while (m.order.length > 20) { const o = m.order.pop(); delete m.items[o]; }
+    cset('hist_' + kind, m);
+}
+export function hdel(kind: 'c' | 's', id: number) {
+    const m = cget<any>('hist_' + kind);
+    if (!m || !m.items || !(id in m.items)) return;
+    delete m.items[id]; m.order = (m.order || []).filter((x: number) => x !== id);
+    cset('hist_' + kind, m);
+}
 export function clearCache() {
     try { Object.keys(localStorage).filter((x) => x.startsWith('pc_')).forEach((x) => localStorage.removeItem(x)); } catch {}
 }

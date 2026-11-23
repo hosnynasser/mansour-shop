@@ -892,11 +892,15 @@ async function handlePos(request, env, path, ctx) {
     }
     if (path.startsWith('/api/pos/supplier/') && request.method === 'GET' && !path.endsWith('/payment')) {
         const id = parseInt(path.slice('/api/pos/supplier/'.length), 10) || 0;
-        const sup = await env.POS_DB.prepare('SELECT * FROM suppliers WHERE id = ?').bind(id).first();
+        // الـ3 قراءات في دفعة واحدة (رحلة واحدة لقاعدة البيانات) والنتيجة نفس الأرقام بالظبط
+        const rs = await env.POS_DB.batch([
+            env.POS_DB.prepare('SELECT * FROM suppliers WHERE id = ?').bind(id),
+            env.POS_DB.prepare('SELECT id, num, ts, total, paid, status, note FROM purchases WHERE supplier_id = ? ORDER BY ts DESC, id DESC LIMIT 50').bind(id),
+            env.POS_DB.prepare('SELECT id, ts, day, amount, staff, note FROM supplier_payments WHERE supplier_id = ? ORDER BY ts DESC, id DESC LIMIT 100').bind(id),
+        ]);
+        const sup = (rs[0].results || [])[0];
         if (!sup) return json({ error: 'not_found' }, 404);
-        const { results: purchases } = await env.POS_DB.prepare('SELECT id, num, ts, total, paid, status, note FROM purchases WHERE supplier_id = ? ORDER BY ts DESC, id DESC LIMIT 50').bind(id).all();
-        const { results: payments } = await env.POS_DB.prepare('SELECT id, ts, day, amount, staff, note FROM supplier_payments WHERE supplier_id = ? ORDER BY ts DESC, id DESC LIMIT 100').bind(id).all();
-        return json({ supplier: sup, purchases: purchases || [], payments: payments || [] });
+        return json({ supplier: sup, purchases: rs[1].results || [], payments: rs[2].results || [] });
     }
     if (path.startsWith('/api/pos/supplier/') && request.method === 'PATCH') {
         if (!manager) return json({ error: 'forbidden' }, 403);
