@@ -810,6 +810,72 @@ async function handlePos(request, env, path, ctx) {
 
 
 
+    // ---- مجموعات العملاء/الموردين ----
+    // المجموعة نص في عمود grp على كل عميل/مورد. جدول grp_defs بيحفظ المجموعات الفاضية (اللي لسه ماليهاش أعضاء).
+    // حذف/تعديل مجموعة بيلمس عمود grp بس: الأرصدة والقيود والفواتير ما بتتغيرش أبداً.
+    if (path.startsWith('/api/pos/groups')) {
+        const GT = { customers: 'customers', suppliers: 'suppliers' };
+        await env.POS_DB.prepare('CREATE TABLE IF NOT EXISTS grp_defs (section TEXT NOT NULL, name TEXT NOT NULL, PRIMARY KEY (section, name))').run();
+        const gname = (v) => (typeof v === 'string' ? v.trim().slice(0, 40) : '');
+        const memberCount = async (tbl, name) => (await env.POS_DB.prepare('SELECT COUNT(*) AS n FROM ' + tbl + ' WHERE TRIM(grp) = ?').bind(name).first())?.n || 0;
+        const exists = async (section, tbl, name) => {
+            const d = await env.POS_DB.prepare('SELECT 1 AS x FROM grp_defs WHERE section = ? AND name = ?').bind(section, name).first();
+            return !!d || (await memberCount(tbl, name)) > 0;
+        };
+        if (path === '/api/pos/groups' && request.method === 'GET') {
+            const section = new URL(request.url).searchParams.get('section') || '';
+            const tbl = GT[section];
+            if (!tbl) return json({ error: 'bad_section' }, 400);
+            const { results } = await env.POS_DB.prepare('SELECT g AS name, SUM(n) AS count FROM (SELECT name AS g, 0 AS n FROM grp_defs WHERE section = ? UNION ALL SELECT TRIM(grp) AS g, COUNT(*) AS n FROM ' + tbl + " WHERE grp IS NOT NULL AND TRIM(grp) <> '' GROUP BY TRIM(grp)) GROUP BY g ORDER BY g").bind(section).all();
+            return json({ groups: results || [] });
+        }
+        if (request.method === 'POST' && (path === '/api/pos/groups' || path === '/api/pos/groups/rename' || path === '/api/pos/groups/delete')) {
+            if (!manager) return json({ error: 'forbidden' }, 403);
+            let body;
+            try { body = await request.json(); } catch { return json({ error: 'bad_json' }, 400); }
+            const section = typeof body.section === 'string' ? body.section : '';
+            const tbl = GT[section];
+            if (!tbl) return json({ error: 'bad_section' }, 400);
+            if (path === '/api/pos/groups') {
+                const name = gname(body.name);
+                if (!name || name === '__none') return json({ error: 'bad_name' }, 400);
+                if (await exists(section, tbl, name)) return json({ error: 'exists' }, 409);
+                try { await env.POS_DB.prepare('INSERT INTO grp_defs (section, name) VALUES (?, ?)').bind(section, name).run(); } catch { return json({ error: 'exists' }, 409); }
+                return json({ ok: true });
+            }
+            if (path === '/api/pos/groups/rename') {
+                const from = gname(body.from), to = gname(body.to);
+                if (!from || !to || to === '__none') return json({ error: 'bad_name' }, 400);
+                if (from === to) return json({ ok: true, unchanged: true });
+                if (!(await exists(section, tbl, from))) return json({ error: 'not_found' }, 404);
+                if (await exists(section, tbl, to)) return json({ error: 'exists' }, 409);
+                await env.POS_DB.prepare('INSERT OR IGNORE INTO grp_defs (section, name) VALUES (?, ?)').bind(section, from).run();
+                let res;
+                try {
+                    res = await env.POS_DB.batch([
+                        env.POS_DB.prepare('UPDATE grp_defs SET name = ? WHERE section = ? AND name = ? AND NOT EXISTS (SELECT 1 FROM ' + tbl + ' WHERE TRIM(grp) = ?)').bind(to, section, from, to),
+                        env.POS_DB.prepare('UPDATE ' + tbl + ' SET grp = ? WHERE TRIM(grp) = ? AND changes() = 1').bind(to, from),
+                    ]);
+                } catch { return json({ error: 'exists' }, 409); }
+                if (!(res[0].meta.changes > 0)) return json({ error: 'exists' }, 409);
+                return json({ ok: true, moved: res[1].meta.changes || 0 });
+            }
+            const name = gname(body.name);
+            if (!name) return json({ error: 'bad_name' }, 400);
+            const expected = Number(body.expectedCount);
+            if (!Number.isInteger(expected) || expected < 0) return json({ error: 'bad_expected' }, 400);
+            if (!(await exists(section, tbl, name))) return json({ error: 'not_found' }, 404);
+            if ((await memberCount(tbl, name)) !== expected) return json({ error: 'changed' }, 409);
+            const res = await env.POS_DB.batch([
+                env.POS_DB.prepare('UPDATE ' + tbl + ' SET grp = NULL WHERE TRIM(grp) = ? AND (SELECT COUNT(*) FROM ' + tbl + ' WHERE TRIM(grp) = ?) = ?').bind(name, name, expected),
+                env.POS_DB.prepare('DELETE FROM grp_defs WHERE section = ? AND name = ? AND (SELECT COUNT(*) FROM ' + tbl + ' WHERE TRIM(grp) = ?) = 0').bind(section, name, name),
+            ]);
+            if ((await memberCount(tbl, name)) > 0) return json({ error: 'changed' }, 409);
+            return json({ ok: true, detached: res[0].meta.changes || 0 });
+        }
+        return json({ error: 'not_found' }, 404);
+    }
+
     // ---- الموردين (مدير فقط) ----
     if (path === '/api/pos/suppliers' && request.method === 'GET') {
         const { results } = await env.POS_DB.prepare('SELECT id, name, phone, notes, grp, balance FROM suppliers ORDER BY name LIMIT 500').all();

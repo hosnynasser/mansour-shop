@@ -7,6 +7,7 @@ import ScannerModal from './ScannerModal';
 import { ExportCard, ProfitView } from './ReportsExtra';
 import { Loyalty } from './LoyaltyUI';
 import { NewSupplierSheet, SupplierSheet } from './PurchasesScreen';
+import GroupsManager from './GroupsManager';
 
 // تحميل تدريجي: بيعرض أول 40 وبيزود لما المستخدم ينزل
 function MoreSentinel({ shown, total, more }: { shown: number; total: number; more: () => void }) {
@@ -112,7 +113,7 @@ export function InvoicesScreen({ staff, openInvoice, openQuote, notify, initialV
 }
 
 // ---------- تبويب الموردين (نفس بيانات المشتريات الحالية، عرض بس) ----------
-function SuppliersPane({ notify }: { notify: (m: string, b?: boolean) => void }) {
+function SuppliersPane({ notify, reloadKey }: { notify: (m: string, b?: boolean) => void; reloadKey?: number }) {
     const [list, setList] = useState<any[] | null>(() => cget<any[]>('suppliers'));
     const [fst, setFst] = useState<'loading' | 'ok' | 'err'>('loading');
     const [q, setQ] = useState('');
@@ -121,10 +122,13 @@ function SuppliersPane({ notify }: { notify: (m: string, b?: boolean) => void })
     const [newOpen, setNewOpen] = useState(false);
     const [det, setDet] = useState<any>(null);
     const load = async () => { const c0 = cred(); setFst('loading'); try { const r = await api('/api/pos/suppliers'); setList(r.suppliers || []); csetIf('suppliers', r.suppliers || [], c0); setFst('ok'); } catch { setFst('err'); notify('مشكلة في تحميل الموردين، الأرقام المعروضة قديمة', true); } };
-    useEffect(() => { load(); }, []);
+    const [defGroups, setDefGroups] = useState<string[]>([]);
+    const loadDefs = async () => { try { const r = await api('/api/pos/groups?section=suppliers'); setDefGroups((r.groups || []).map((g: any) => g.name)); } catch { /* بنكمل بمجموعات الأعضاء */ } };
+    useEffect(() => { load(); loadDefs(); }, []);
+    useEffect(() => { if (reloadKey) { load(); loadDefs(); } }, [reloadKey]);
     const open = async (id: number) => { try { const r = await api('/api/pos/supplier/' + id); setDet({ s: r.supplier, purchases: r.purchases || [], payments: r.payments || [] }); } catch { notify('مشكلة في فتح المورد', true); } };
     const all = list || [];
-    const groups = useMemo(() => Array.from(new Set(all.map((x) => (x.grp || '').trim()).filter(Boolean))).sort() as string[], [list]);
+    const groups = useMemo(() => Array.from(new Set([...all.map((x) => (x.grp || '').trim()), ...defGroups].filter(Boolean))).sort() as string[], [list, defGroups]);
     useEffect(() => { if (grpSel && grpSel !== '__none' && !groups.includes(grpSel)) setGrpSel(''); }, [groups, grpSel]);
     const rows = all.filter((x) => (!grpSel || (grpSel === '__none' ? !(x.grp || '').trim() : (x.grp || '').trim() === grpSel)) && smartMatch(x.name + ' ' + (x.phone || '') + ' ' + (x.grp || ''), q));
     // اتجاه الحساب: رصيد المورد الموجب = مستحق له علينا (عليا). الرصيد السالب (لو حصل) = ليا عنده
@@ -205,6 +209,8 @@ export function StockScreen({ staff, products, categories, refresh, notify }: { 
     const [catSel, setCatSel] = useState('');
     const [shown, setShown] = useState(STOCK_N);
     const [lowOnly, setLowOnly] = useState(false);
+    const [lowOpen, setLowOpen] = useState(false);
+    useEffect(() => { if (!lowOpen) return; document.documentElement.classList.add('dd-lock'); return () => document.documentElement.classList.remove('dd-lock'); }, [lowOpen]);
     useEffect(() => { setShown(STOCK_N); }, [s, catSel, lowOnly]);
     const idx = useMemo(() => products.map((p) => (p.name + ' ' + p.code).toLowerCase()), [products]);
     const [form, setForm] = useState<{ mode: 'add' | 'edit'; name: string; code: string; price: string; cost: string; qty: string; cat: string } | null>(null);
@@ -234,7 +240,7 @@ export function StockScreen({ staff, products, categories, refresh, notify }: { 
             notify(r.hidden ? 'اتخفى الصنف (له فواتير قديمة) ✓' : 'اتمسح الصنف ✓'); refresh();
         } catch { notify('مشكلة في المسح', true); }
     };
-    const filtered = useMemo(() => products.filter((p, i) => (!catSel || p.cat === catSel) && (!lowOnly || p.qty <= ((p as any).min_qty ?? 5)) && (!s || idx[i].includes(s))), [products, idx, catSel, s, lowOnly]);
+    const filtered = useMemo(() => products.filter((p, i) => (!catSel || (catSel === '__nocat' ? !categories.includes(p.cat) : p.cat === catSel)) && (!lowOnly || p.qty <= ((p as any).min_qty ?? 5)) && (!s || idx[i].includes(s))), [products, idx, catSel, s, lowOnly, categories]);
     const setCat = async (code: string, cat: string) => {
         try { await api('/api/pos/product-cat', 'POST', { code, cat }); refresh(); notify('اتغير التصنيف ✓'); } catch { notify('مشكلة في حفظ التصنيف', true); }
     };
@@ -276,6 +282,9 @@ export function StockScreen({ staff, products, categories, refresh, notify }: { 
         setBusy('');
     };
     const low = useMemo(() => products.filter((p) => p.qty <= ((p as any).min_qty ?? 5)), [products]);
+    const lowByCat = useMemo(() => { const m: Record<string, number> = {}; low.forEach((p) => { if (categories.includes(p.cat)) m[p.cat] = (m[p.cat] || 0) + 1; }); return m; }, [low, categories]);
+    const lowNoCat = useMemo(() => low.filter((p) => !categories.includes(p.cat)).length, [low, categories]);
+    const filteredLowCount = useMemo(() => low.filter((p) => !catSel || (catSel === '__nocat' ? !categories.includes(p.cat) : p.cat === catSel)).length, [low, catSel, categories]);
     const minDirty = useMemo(() => products.some((p) => minEdit[p.code] !== undefined && minEdit[p.code] !== String((p as any).min_qty ?? 5)), [products, minEdit]);
 
     return (
@@ -288,8 +297,22 @@ export function StockScreen({ staff, products, categories, refresh, notify }: { 
                 {manager ? <button className="btn btn-ghost btn-sm" style={{ minHeight: 46, flex: '0 0 auto', display: 'flex', alignItems: 'center', gap: 6 }} onClick={() => setStOpen(true)} title="إعدادات المخزون"><Icon n="settings" size={20} /> الإعدادات</button> : null}
             </div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-                <CatChips categories={categories} sel={catSel} setSel={(c) => { setCatSel(c); setLowOnly(false); }} products={products} />
-                <div className="cat-dd"><button className={'cat-dd-btn' + (lowOnly ? ' on' : '')} style={lowOnly ? { background: 'var(--danger)', borderColor: 'var(--danger)' } : { color: low.length ? 'var(--danger)' : undefined }} onClick={() => { setLowOnly(!lowOnly); setCatSel(''); }}>النواقص {low.length}</button></div>
+                <CatChips categories={categories} sel={lowOnly ? '' : catSel} setSel={(c) => { setCatSel(c); setLowOnly(false); }} products={products} />
+                <div className="cat-dd">
+                    <button className={'cat-dd-btn' + (lowOnly ? ' on' : '')} style={lowOnly ? { background: 'var(--danger)', borderColor: 'var(--danger)' } : { color: low.length ? 'var(--danger)' : undefined }} aria-expanded={lowOpen} onClick={() => setLowOpen((v) => !v)}>النواقص {lowOnly ? filteredLowCount : low.length}{lowOnly && catSel ? ' · ' + (catSel === '__nocat' ? 'بدون تصنيف' : catSel) : ''} {lowOpen ? '▴' : '▾'}</button>
+                    {lowOpen ? (
+                        <>
+                            <div className="cat-dd-back" onClick={() => setLowOpen(false)} />
+                            <div className="cat-dd-list">
+                                <button className={lowOnly && !catSel ? 'on' : ''} onClick={() => { setLowOnly(true); setCatSel(''); setLowOpen(false); }}>كل التصنيفات ({low.length})</button>
+                                {categories.map((c) => (
+                                    <button key={c} className={lowOnly && catSel === c ? 'on' : ''} onClick={() => { setLowOnly(true); setCatSel(c); setLowOpen(false); }}>{c} ({lowByCat[c] || 0})</button>
+                                ))}
+                                {lowNoCat > 0 ? <button className={lowOnly && catSel === '__nocat' ? 'on' : ''} onClick={() => { setLowOnly(true); setCatSel('__nocat'); setLowOpen(false); }}>بدون تصنيف ({lowNoCat})</button> : null}
+                            </div>
+                        </>
+                    ) : null}
+                </div>
             </div>
             {manager ? <button className="btn btn-amber btn-block" style={{ marginBottom: 10 }} onClick={() => setForm({ mode: 'add', name: '', code: '', price: '', cost: '', qty: '', cat: '' })}><Icon n="plus" size={18} /> إضافة صنف جديد</button> : null}
             {!manager ? <div className="err-box" style={{ background: '#fff8ea', color: 'var(--amber-d)' }}>عرض فقط — تعديل الأرصدة للمدير</div> : null}
@@ -610,6 +633,10 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
     const [grpOpen, setGrpOpen] = useState(false);
     const [setOpen, setSetOpen] = useState(false);
     const [secOpen, setSecOpen] = useState(false);
+    const [grpBump, setGrpBump] = useState(0);
+    const [defGroups, setDefGroups] = useState<string[]>([]);
+    const loadDefs = async () => { try { const r = await api('/api/pos/groups?section=customers'); setDefGroups((r.groups || []).map((g: any) => g.name)); } catch { /* بنكمل بمجموعات الأعضاء */ } };
+    useEffect(() => { loadDefs(); }, []);
     useEffect(() => { if (!detail) setSetOpen(false); }, [detail]);
     const [grp, setGrp] = useState('');
 
@@ -740,7 +767,7 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
 
     const dq = useDeferredValue(q);
     const s = dq.trim().toLowerCase();
-    const groups = useMemo(() => Array.from(new Set(list.map((c) => (c.grp || '').trim()).filter(Boolean))).sort(), [list]);
+    const groups = useMemo(() => Array.from(new Set([...list.map((c) => (c.grp || '').trim()), ...defGroups].filter(Boolean))).sort(), [list, defGroups]);
     useEffect(() => { if (grpSel && grpSel !== '__none' && !groups.includes(grpSel)) setGrpSel(''); }, [groups, grpSel]);
     const filtered = useMemo(() => list.filter((c) => (!grpSel || (grpSel === '__none' ? !(c.grp || '').trim() : (c.grp || '').trim() === grpSel)) && smartMatch(c.name + ' ' + (c.phone || '') + ' ' + (c.grp || ''), dq)), [list, dq, grpSel]);
     // ليا = اللي العملاء عليهم (أرصدة موجبة بس) | عليا = رصيد العملاء الدايرين (له) | الصافي = ليا - عليا
@@ -764,7 +791,7 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
             </div>
                 <button className="btn btn-ghost" aria-label="إعدادات القسم" aria-expanded={secOpen} style={{ flex: 'none', minWidth: 46, fontSize: 20, padding: '0 10px' }} onClick={() => setSecOpen(true)}>⚙️</button>
             </div>
-            {mode === 'sup' && manager ? <SuppliersPane notify={notify} /> : (<>
+            {mode === 'sup' && manager ? <SuppliersPane notify={notify} reloadKey={grpBump} /> : (<>
             <div className="close-card" style={{ display: 'flex', padding: '2px 4px', marginBottom: 8 }}>
                 <Sum l="ليا (على العملاء)" v={fmt(totalDebt) + ' ج'} c="var(--danger)" />
                 <Sum l="عليا (رصيد للعملاء)" v={fmt(totalCredit) + ' ج'} c="var(--ok)" />
@@ -950,7 +977,7 @@ export function CustomersScreen({ staff, openInvoice, notify, startDebtInvoice }
                     <div className="sheet-back" onClick={() => setSecOpen(false)} />
                     <div className="sheet">
                         <div className="sheet-h"><h3>{mode === 'sup' ? 'إعدادات الموردين' : 'إعدادات العملاء'}</h3><button className="btn btn-ghost btn-sm" style={{ marginInlineStart: 'auto' }} onClick={() => setSecOpen(false)}>قفل</button></div>
-                        <div className="sheet-b"><div className="empty" style={{ padding: 24 }}>لسه مفيش إعدادات</div></div>
+                        <div className="sheet-b"><GroupsManager section={mode === 'sup' ? 'suppliers' : 'customers'} manager={manager} notify={notify} onChanged={() => { setGrpBump((n) => n + 1); load(); loadDefs(); }} /></div>
                     </div>
                 </>
             ) : null}

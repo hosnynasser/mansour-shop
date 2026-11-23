@@ -167,3 +167,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_ledger_idem ON ledger(idem) WHERE idem IS 
 -- customer groups named by the owner
 ALTER TABLE customers ADD COLUMN grp TEXT;
 ALTER TABLE suppliers ADD COLUMN grp TEXT;
+
+-- empty groups (created by the owner before any member is in them)
+CREATE TABLE IF NOT EXISTS grp_defs (section TEXT NOT NULL, name TEXT NOT NULL, PRIMARY KEY (section, name));
