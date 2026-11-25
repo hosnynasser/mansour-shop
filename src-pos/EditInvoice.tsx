@@ -62,11 +62,11 @@ export default function EditInvoice({ inv, items, products, onClose, onSaved, no
                     <div className="field">
                         <label>العميل</label>
                         <div className="cust-dd-wrap" style={{ position: 'relative', marginBottom: 12 }}>
-                            <input ref={custRef} value={custOpen ? custQ : custLabel} readOnly={!custOpen} placeholder={custOpen ? 'ابحث عن عميل…' : 'من غير عميل'} onChange={(e) => setCustQ(e.target.value)} onClick={() => { if (!custOpen) setCustOpen(true); }} style={{ width: '100%', paddingLeft: custId ? 112 : 58 }} />
-                            <button className="btn btn-navy btn-sm" aria-label="اختيار عميل" style={{ position: 'absolute', left: 5, top: 5, bottom: 5, width: 46, minHeight: 0, padding: 0, justifyContent: 'center' }} onClick={() => setCustOpen((v) => !v)}>
+                            <input ref={custRef} value={custOpen ? custQ : custLabel} readOnly={!custOpen} placeholder={custOpen ? 'ابحث عن عميل…' : 'من غير عميل'} onChange={(e) => setCustQ(e.target.value)} onClick={() => { if (!custOpen) setCustOpen(true); }} style={{ width: '100%', paddingRight: 58, paddingLeft: custId ? 76 : 14 }} />
+                            <button className="btn btn-navy btn-sm" aria-label="اختيار عميل" style={{ position: 'absolute', right: 5, top: 5, bottom: 5, width: 46, minHeight: 0, padding: 0, justifyContent: 'center' }} onClick={() => setCustOpen((v) => !v)}>
                                 <span style={{ fontSize: 16, lineHeight: 1, display: 'inline-block', transform: custOpen ? 'rotate(180deg)' : 'none' }}>▾</span>
                             </button>
-                            {custId ? <button className="btn btn-ghost btn-sm" style={{ position: 'absolute', left: 56, top: 5, bottom: 5, minHeight: 0, padding: '0 10px' }} onClick={() => { setCustId(0); setCustOpen(false); if (payment === 'debt') setPayment('cash'); }}>شيل</button> : null}
+                            {custId ? <button className="btn btn-ghost btn-sm" style={{ position: 'absolute', left: 6, top: 5, bottom: 5, minHeight: 0, padding: '0 10px' }} onClick={() => { setCustId(0); setCustOpen(false); if (payment === 'debt') setPayment('cash'); }}>شيل</button> : null}
                             {custOpen ? (
                                 <>
                                     <div className="cat-dd-back" onClick={() => setCustOpen(false)} />

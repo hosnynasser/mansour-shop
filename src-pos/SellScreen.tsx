@@ -292,11 +292,11 @@ export default function SellScreen({
                                 <div className="field">
                                     <label>اسم العميل{payment === 'debt' ? '' : ' (اختياري)'}</label>
                                     <div className="cust-dd-wrap" style={{ position: 'relative', marginBottom: 12 }}>
-                                        <input ref={nameRef} value={pickOpen ? custQ : selCust ? selCust.name : payment === 'debt' ? '' : custName} readOnly={!pickOpen && (!!custId || payment === 'debt')} onChange={(e) => { if (pickOpen) setCustQ(e.target.value); else setCustName(e.target.value); }} placeholder={pickOpen ? 'ابحث عن عميل…' : payment === 'debt' ? 'اختار عميل من القايمة' : 'اسم العميل'} onClick={() => { if (!pickOpen && (custId || payment === 'debt')) togglePick(); }} style={{ width: '100%', paddingLeft: custId ? 112 : 58 }} />
-                                        <button className="btn btn-navy btn-sm" aria-label="اختيار عميل من الموجودين" title="اختيار عميل من الموجودين" style={{ position: 'absolute', left: 5, top: 5, bottom: 5, width: 46, minHeight: 0, padding: 0, justifyContent: 'center' }} onClick={togglePick}>
+                                        <input ref={nameRef} value={pickOpen ? custQ : selCust ? selCust.name : payment === 'debt' ? '' : custName} readOnly={!pickOpen && (!!custId || payment === 'debt')} onChange={(e) => { if (pickOpen) setCustQ(e.target.value); else setCustName(e.target.value); }} placeholder={pickOpen ? 'ابحث عن عميل…' : payment === 'debt' ? 'اختار عميل من القايمة' : 'اسم العميل'} onClick={() => { if (!pickOpen && (custId || payment === 'debt')) togglePick(); }} style={{ width: '100%', paddingRight: 58, paddingLeft: custId ? 76 : 14 }} />
+                                        <button className="btn btn-navy btn-sm" aria-label="اختيار عميل من الموجودين" title="اختيار عميل من الموجودين" style={{ position: 'absolute', right: 5, top: 5, bottom: 5, width: 46, minHeight: 0, padding: 0, justifyContent: 'center' }} onClick={togglePick}>
                                             <span style={{ fontSize: 16, lineHeight: 1, display: 'inline-block', transform: pickOpen ? 'rotate(180deg)' : 'none' }}>▾</span>
                                         </button>
-                                        {custId ? <button className="btn btn-ghost btn-sm" style={{ position: 'absolute', left: 56, top: 5, bottom: 5, minHeight: 0, padding: '0 10px' }} onClick={() => { setCustId(0); setPickOpen(false); }}>شيل</button> : null}
+                                        {custId ? <button className="btn btn-ghost btn-sm" style={{ position: 'absolute', left: 6, top: 5, bottom: 5, minHeight: 0, padding: '0 10px' }} onClick={() => { setCustId(0); setPickOpen(false); }}>شيل</button> : null}
                                     {pickOpen ? (
                                         <>
                                             <div className="cat-dd-back" onClick={() => setPickOpen(false)} />
@@ -310,11 +310,6 @@ export default function SellScreen({
                                                     </button>
                                                 ))}
                                                 {customers !== null && (customers || []).length === 0 ? <div className="cust-dd-empty">مفيش عملاء لسه</div> : null}
-                                                <div className="cust-dd-new">
-                                                    <input placeholder="اسم عميل جديد" value={newCustName} onChange={(e) => setNewCustName(e.target.value)} />
-                                                    <input placeholder="تليفون" inputMode="tel" dir="ltr" value={newCustPhone} onChange={(e) => setNewCustPhone(e.target.value)} style={{ textAlign: 'end' }} />
-                                                    <button className="btn btn-navy btn-sm" onClick={quickAddCustomer}>إضافة</button>
-                                                </div>
                                             </div>
                                         </>
                                     ) : null}
