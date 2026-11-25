@@ -10,7 +10,7 @@ export interface CartLine { code: string; name: string; price: number; qty: numb
 export interface Invoice {
     id: number; num: string; ts: string; staff: string; payment: string;
     subtotal: number; discount: number; total: number; status: string;
-    customer_name: string; customer_phone: string;
+    customer_name: string; customer_phone: string; customer_id?: number | null;
     pointsEarned?: number; pointsBalance?: number; category_id?: number | null;
 }
 export interface InvoiceItem { code: string; name: string; price: number; qty: number; discount: number; line_total: number; }

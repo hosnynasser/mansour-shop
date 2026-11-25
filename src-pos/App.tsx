@@ -13,6 +13,7 @@ import SharePdf from './SharePdf';
 import BtPrint from './BtPrint';
 import { loadUiPrefs, useUiPrefs } from './uiPrefs';
 import { InvoiceCategoryPicker } from './InvoiceCategories';
+import EditInvoice from './EditInvoice';
 import logo from '../src/photos/logo-mansour.png';
 
 // نسخة محفوظة على الجهاز لآخر فواتير اتفتحت (للعرض الفوري بس؛ بتتأكد من السيرفر في كل فتحة)
@@ -345,6 +346,7 @@ export default function App() {
         } catch { notify('مشكلة في الإلغاء', true); }
     };
 
+    const [editInv, setEditInv] = useState(false);
     const voidInvoice = async (id: number) => {
         if (!confirm('متأكد إنك عايز تلغي الفاتورة دي؟ المخزون هيرجع تاني.')) return;
         try {
@@ -501,6 +503,7 @@ export default function App() {
                                 <BtPrint inv={detail.inv} items={detail.items} logo={logo} notify={notify} />
                                 {uip.wa ? <button className="btn btn-wa btn-block" onClick={() => waShare(detail.inv, detail.items)}>إرسال واتساب</button> : null}
                                 <SharePdf inv={detail.inv} items={detail.items} logo={logo} notify={notify} />
+                                {manager && detail.inv.status === 'completed' ? <button className="btn btn-ghost btn-block" onClick={() => setEditInv(true)}>✏️ تعديل الفاتورة</button> : null}
                                 {manager && detail.inv.status !== 'voided' ? <button className="btn btn-danger btn-block" onClick={() => voidInvoice(detail.inv.id)}>إلغاء الفاتورة</button> : null}
                                 </> : null}
                             </div>
@@ -508,6 +511,8 @@ export default function App() {
                     </div>
                 </>
             ) : null}
+
+            {editInv && detail ? <EditInvoice inv={detail.inv} items={detail.items} products={products} notify={notify} onClose={() => setEditInv(false)} onSaved={() => { const id = detail.inv.id; setEditInv(false); invCacheDel(id); openInvoice(id); window.dispatchEvent(new Event('invoice-category-changed')); refreshProducts(); api('/api/pos/customers').then((r) => csetIf('customers', r.customers || [], cred())).catch(() => {}); }} /> : null}
 
             {/* تفاصيل عرض سعر */}
             {quoteDetail ? (() => {
