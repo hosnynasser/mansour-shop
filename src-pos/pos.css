@@ -347,3 +347,16 @@ html.dd-lock,html.dd-lock body,html.dd-lock #root,html.dd-lock .pos-main{overflo
 .stock-card .sc-cat{flex:1;min-width:120px;margin-top:0;font-size:14px;padding:8px}
 .stock-card .sc-catname{font-size:13px;color:var(--muted)}
 .stock-card .sc-actions{display:flex;gap:8px;flex-wrap:wrap;border-top:1px solid var(--line);padding-top:8px}
+
+.cust-dd-wrap .cust-dd{top:100%;margin-top:4px;inset-inline-start:0;width:100%;min-width:0;max-height:min(34vh,280px);display:flex;flex-direction:column;overflow-y:auto}
+.cust-dd .cust-dd-search{position:sticky;top:0;background:#fff;padding:8px;border-bottom:1px solid var(--line);z-index:1}
+.cust-dd .cust-dd-search input{width:100%;border:1.5px solid var(--line);border-radius:10px;padding:9px 12px;font-size:15px}
+.cust-dd button{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.cust-dd .cd-n{display:flex;flex-direction:column;gap:2px;min-width:0;text-align:start}
+.cust-dd .cd-n small{color:var(--muted);font-size:12px;font-weight:400;text-align:end}
+.cust-dd .cd-b{color:var(--danger);font-size:12px;font-weight:800;white-space:nowrap}
+.cust-dd .cust-dd-empty{padding:12px 16px;font-size:13px;color:var(--muted)}
+.cust-dd .cust-dd-new{display:flex;gap:6px;padding:8px;border-top:1px solid var(--line);background:#f7f9fc;position:sticky;bottom:0}
+.cust-dd .cust-dd-new input{border:1.5px solid var(--line);border-radius:10px;padding:8px 10px;font-size:14px;min-width:0}
+.cust-dd .cust-dd-new input:first-child{flex:2}.cust-dd .cust-dd-new input:nth-child(2){flex:1.4}
+.cust-dd .cust-dd-new button{background:var(--navy);color:#fff;border:0;border-radius:10px;padding:8px 14px;font-size:14px;font-weight:700;justify-content:center}

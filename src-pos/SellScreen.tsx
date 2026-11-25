@@ -100,6 +100,7 @@ export default function SellScreen({
     };
     const pickDebt = async () => {
         setPayment('debt');
+        if (!custId) setPickOpen(true);
         if (customers === null) {
             try { const r = await api('/api/pos/customers'); setCustomers(r.customers || []); } catch { notify('مشكلة في تحميل العملاء', true); setCustomers([]); }
         }
@@ -288,33 +289,34 @@ export default function SellScreen({
                                 {(
                                 <div className="field">
                                     <label>اسم العميل{payment === 'debt' ? '' : ' (اختياري)'}</label>
-                                    <div style={{ position: 'relative', marginBottom: 12 }}>
+                                    <div className="cust-dd-wrap" style={{ position: 'relative', marginBottom: 12 }}>
                                         <input value={selCust ? selCust.name : payment === 'debt' ? '' : custName} readOnly={!!custId || payment === 'debt'} onChange={(e) => setCustName(e.target.value)} placeholder={payment === 'debt' ? 'اختار عميل من القايمة' : 'اسم العميل'} onClick={() => { if (custId || payment === 'debt') togglePick(); }} style={{ width: '100%', paddingLeft: custId ? 112 : 58 }} />
                                         <button className="btn btn-navy btn-sm" aria-label="اختيار عميل من الموجودين" title="اختيار عميل من الموجودين" style={{ position: 'absolute', left: 5, top: 5, bottom: 5, width: 46, minHeight: 0, padding: 0, justifyContent: 'center' }} onClick={togglePick}>
                                             <span style={{ fontSize: 16, lineHeight: 1, display: 'inline-block', transform: pickOpen ? 'rotate(180deg)' : 'none' }}>▾</span>
                                         </button>
                                         {custId ? <button className="btn btn-ghost btn-sm" style={{ position: 'absolute', left: 56, top: 5, bottom: 5, minHeight: 0, padding: '0 10px' }} onClick={() => { setCustId(0); setPickOpen(false); }}>شيل</button> : null}
-                                    </div>
-                                    {payment === 'debt' || pickOpen ? (
-                                        <div style={{ marginTop: 10, border: '1.5px dashed var(--amber)', borderRadius: 12, padding: 10 }}>
-                                            <label style={{ fontSize: 13, fontWeight: 700, color: 'var(--navy)' }}>{payment === 'debt' ? 'اختار العميل (مطلوب للآجل)' : 'اختار العميل'}</label>
-                                            <input placeholder="ابحث عن عميل…" value={custQ} onChange={(e) => setCustQ(e.target.value)} style={{ width: '100%', border: '1.5px solid var(--line)', borderRadius: 10, padding: '9px 12px', margin: '6px 0' }} />
-                                            <div style={{ maxHeight: 160, overflowY: 'auto' }}>
-                                                {(customers || []).filter((c) => !custQ.trim() || c.name.toLowerCase().includes(custQ.trim().toLowerCase()) || c.phone.includes(custQ.trim())).slice(0, 20).map((c) => (
-                                                    <button key={c.id} onClick={() => { setCustId(c.id); setCustName(''); setPickOpen(false); }} style={{ display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'center', padding: '9px 10px', marginBottom: 4, borderRadius: 10, border: custId === c.id ? '2px solid var(--amber)' : '1.5px solid var(--line)', background: custId === c.id ? '#fff8ea' : '#fff', fontSize: 14 }}>
-                                                        <span><b>{c.name}</b>{c.phone ? ' · ' + c.phone : ''}</span>
-                                                        {(c.balance || 0) > 0 ? <span style={{ fontSize: 12, color: 'var(--danger)', fontWeight: 700 }}>عليه {fmt(c.balance!)}</span> : null}
+                                    {pickOpen ? (
+                                        <>
+                                            <div className="cat-dd-back" onClick={() => setPickOpen(false)} />
+                                            <div className="cat-dd-list cust-dd" role="listbox" aria-label="العملاء">
+                                                <div className="cust-dd-search"><input placeholder="ابحث عن عميل…" value={custQ} onChange={(e) => setCustQ(e.target.value)} /></div>
+                                                {customers === null ? <div className="cust-dd-empty">جاري تحميل العملاء…</div> : null}
+                                                {(customers || []).filter((c) => !custQ.trim() || c.name.toLowerCase().includes(custQ.trim().toLowerCase()) || c.phone.includes(custQ.trim())).slice(0, 40).map((c) => (
+                                                    <button key={c.id} role="option" aria-selected={custId === c.id} className={custId === c.id ? 'on' : ''} onClick={() => { setCustId(c.id); setCustName(''); setPickOpen(false); }}>
+                                                        <span className="cd-n"><b>{c.name}</b>{c.phone ? <small dir="ltr">{c.phone}</small> : null}</span>
+                                                        {(c.balance || 0) > 0 ? <span className="cd-b">عليه {fmt(c.balance!)}</span> : null}
                                                     </button>
                                                 ))}
-                                                {customers !== null && (customers || []).length === 0 ? <div style={{ fontSize: 13, color: 'var(--muted)', padding: 6 }}>مفيش عملاء لسه</div> : null}
+                                                {customers !== null && (customers || []).length === 0 ? <div className="cust-dd-empty">مفيش عملاء لسه</div> : null}
+                                                <div className="cust-dd-new">
+                                                    <input placeholder="اسم عميل جديد" value={newCustName} onChange={(e) => setNewCustName(e.target.value)} />
+                                                    <input placeholder="تليفون" inputMode="tel" dir="ltr" value={newCustPhone} onChange={(e) => setNewCustPhone(e.target.value)} style={{ textAlign: 'end' }} />
+                                                    <button className="btn btn-navy btn-sm" onClick={quickAddCustomer}>إضافة</button>
+                                                </div>
                                             </div>
-                                            <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-                                                <input placeholder="اسم عميل جديد" value={newCustName} onChange={(e) => setNewCustName(e.target.value)} style={{ flex: 2, border: '1.5px solid var(--line)', borderRadius: 10, padding: '8px 10px', fontSize: 14 }} />
-                                                <input placeholder="تليفون" inputMode="tel" dir="ltr" value={newCustPhone} onChange={(e) => setNewCustPhone(e.target.value)} style={{ flex: 1.4, border: '1.5px solid var(--line)', borderRadius: 10, padding: '8px 10px', fontSize: 14, textAlign: 'end' }} />
-                                                <button className="btn btn-navy btn-sm" onClick={quickAddCustomer}>إضافة</button>
-                                            </div>
-                                        </div>
+                                        </>
                                     ) : null}
+                                    </div>
                                     {!quoteMode ? (<>
                                     <label>طريقة الدفع</label>
                                     <div className="pay-toggle">
