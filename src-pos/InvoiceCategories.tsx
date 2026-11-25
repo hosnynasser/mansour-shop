@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api } from './lib';
+import { api, cred } from './lib';
 type Cat = { id: number; name: string };
 export function InvoiceCategoriesManager({ notify, onChanged }: { notify: (s: string, b?: boolean) => void; onChanged: () => void }) {
     const [cats, setCats] = useState<Cat[]>([]);
@@ -26,11 +26,12 @@ export function InvoiceCategoriesManager({ notify, onChanged }: { notify: (s: st
         </div>)}
     </div>;
 }
+let pickerCats: { c: string; list: Cat[] } | null = null;
 export function InvoiceCategoryPicker({ invoiceId, categoryId, onChanged, notify }: { invoiceId: number; categoryId?: number | null; onChanged: (id: number | null) => void; notify: (s: string, b?: boolean) => void }) {
-    const [cats, setCats] = useState<Cat[]>([]);
-    const [ready, setReady] = useState(false);
+    const [cats, setCats] = useState<Cat[]>(pickerCats && pickerCats.c === cred() ? pickerCats.list : []);
+    const [ready, setReady] = useState(!!(pickerCats && pickerCats.c === cred()));
     const [busy, setBusy] = useState(false);
-    useEffect(() => { let active = true; api('/api/pos/invoice-categories').then((r) => { if (active) { setCats(r.categories || []); setReady(true); } }).catch(() => {}); return () => { active = false; }; }, [invoiceId]);
+    useEffect(() => { let active = true; const c0 = cred(); api('/api/pos/invoice-categories').then((r) => { pickerCats = { c: c0, list: r.categories || [] }; if (active) { setCats(r.categories || []); setReady(true); } }).catch(() => {}); return () => { active = false; }; }, [invoiceId]);
     const save = async (v: string) => {
         setBusy(true);
         try { const id = Number(v) || null; await api('/api/pos/invoice/' + invoiceId + '/category', 'POST', { category_id: id }); onChanged(id); window.dispatchEvent(new Event('invoice-category-changed')); notify('اتحفظ التصنيف'); }

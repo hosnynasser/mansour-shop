@@ -15,6 +15,27 @@ import { loadUiPrefs, useUiPrefs } from './uiPrefs';
 import { InvoiceCategoryPicker } from './InvoiceCategories';
 import logo from '../src/photos/logo-mansour.png';
 
+// نسخة محفوظة على الجهاز لآخر فواتير اتفتحت (للعرض الفوري بس؛ بتتأكد من السيرفر في كل فتحة)
+function invCacheGet(id: number): { inv: Invoice; items: InvoiceItem[] } | null {
+    const m = cget<any>('invc');
+    return m && m.c === cred() && m.items && m.items[id] ? m.items[id] : null;
+}
+function invCacheSet(id: number, inv: Invoice, items: InvoiceItem[], c: string) {
+    if (!c || cred() !== c) return;
+    const m0 = cget<any>('invc');
+    const m = m0 && m0.c === c ? m0 : { c, order: [] as number[], items: {} as Record<string, unknown> };
+    m.items[id] = { inv, items };
+    m.order = [id, ...m.order.filter((x: number) => x !== id)];
+    while (m.order.length > 30) { const o = m.order.pop(); delete m.items[o]; }
+    cset('invc', m);
+}
+function invCacheDel(id: number) {
+    const m = cget<any>('invc');
+    if (!m || !m.items || !(id in m.items)) return;
+    delete m.items[id]; m.order = (m.order || []).filter((x: number) => x !== id);
+    cset('invc', m);
+}
+
 function SettingsArea({ sub, setSub, staff, manager, chqAlerts, notify, categories, products, refresh, onChequesChanged, onLogout }: {
     sub: Sub; setSub: (s: Sub) => void; staff: Staff; manager: boolean; chqAlerts: number; notify: (m: string, b?: boolean) => void;
     categories: string[]; products: Product[]; refresh: () => void; onChequesChanged: () => void; onLogout: () => void;
@@ -177,7 +198,9 @@ export default function App() {
     const [done, setDone] = useState<{ inv: Invoice; items: InvoiceItem[]; timing?: string } | null>(null);
     const [quoteMode, setQuoteMode] = useState(false);
     const [invView, setInvView] = useState<'mine' | 'quotes'>('mine');
-    const [detail, setDetail] = useState<{ inv: Invoice; items: InvoiceItem[] } | null>(null);
+    const [detail, setDetail] = useState<{ inv: Invoice; items: InvoiceItem[]; state: 'loading' | 'ready' | 'failed' } | null>(null);
+    const invReq = useRef(0);
+    const closeDetail = () => { invReq.current++; setDetail(null); };
     const [printJob, setPrintJob] = useState<{ inv: Invoice; items: InvoiceItem[]; mode: 'r80' | 'a4' } | null>(null);
     const [quoteDetail, setQuoteDetail] = useState<{ quote: Quote; items: InvoiceItem[] } | null>(null);
     const [convPay, setConvPay] = useState<'cash' | 'vcash' | 'debt'>('cash');
@@ -261,11 +284,24 @@ export default function App() {
         }
     }, [printJob]);
 
-    const openInvoice = async (id: number) => {
+    // الفاتورة بتفتح فورًا ببيانات القايمة/النسخة المحفوظة، والأصناف بتتحدّث من السيرفر. الطباعة والمشاركة والإلغاء مقفولة لحد ما البيانات تتأكد من السيرفر.
+    const openInvoice = async (id: number, row?: Invoice) => {
+        const tok = ++invReq.current;
+        const cached = invCacheGet(id);
+        const inv0: Invoice | null = row || (cached ? cached.inv : null);
+        if (inv0) setDetail({ inv: inv0, items: cached ? cached.items : [], state: 'loading' });
+        const c0 = cred();
         try {
             const r = await api('/api/pos/invoice/' + id);
-            setDetail({ inv: r.invoice, items: r.items || [] });
-        } catch { notify('مشكلة في فتح الفاتورة', true); }
+            if (invReq.current !== tok) return;
+            const items = r.items || [];
+            invCacheSet(id, r.invoice, items, c0);
+            setDetail({ inv: r.invoice, items, state: 'ready' });
+        } catch {
+            if (invReq.current !== tok) return;
+            if (inv0) setDetail((d) => (d && d.inv.id === id ? { ...d, state: 'failed' } : d));
+            else notify('مشكلة في فتح الفاتورة', true);
+        }
     };
 
     const openQuote = async (id: number) => {
@@ -314,7 +350,7 @@ export default function App() {
         if (!confirm('متأكد إنك عايز تلغي الفاتورة دي؟ المخزون هيرجع تاني.')) return;
         try {
             await api(`/api/pos/invoice/${id}/void`, 'POST');
-            setDetail(null); setDone(null);
+            invCacheDel(id); closeDetail(); setDone(null);
             notify('اتلغت الفاتورة ✓');
             refreshProducts();
         } catch (e: any) {
@@ -435,18 +471,20 @@ export default function App() {
             {/* تفاصيل فاتورة */}
             {detail ? (
                 <>
-                    <div className="sheet-back" onClick={() => setDetail(null)} />
+                    <div className="sheet-back" onClick={closeDetail} />
                     <div className="sheet">
                         <div className="sheet-h">
                             <h3>{detail.inv.num} {detail.inv.status === 'voided' ? '(ملغاة)' : ''}</h3>
-                            <button className="btn btn-ghost btn-sm" style={{ marginInlineStart: 'auto' }} onClick={() => setDetail(null)}>قفل</button>
+                            <button className="btn btn-ghost btn-sm" style={{ marginInlineStart: 'auto' }} onClick={closeDetail}>قفل</button>
                         </div>
                         <div className="sheet-b">
                             <div className="close-line"><span>التاريخ</span><b>{fmtTime(detail.inv.ts)}</b></div>
                             <div className="close-line"><span>الموظف</span><b>{detail.inv.staff}</b></div>
                             <div className="close-line"><span>الدفع</span><b>{paymentLabel(detail.inv.payment)}</b></div>
-                            {manager ? <InvoiceCategoryPicker invoiceId={detail.inv.id} categoryId={detail.inv.category_id} notify={notify} onChanged={(id) => setDetail((d) => d ? { ...d, inv: { ...d.inv, category_id: id } } : null)} /> : null}
+                            {manager ? <InvoiceCategoryPicker invoiceId={detail.inv.id} categoryId={detail.inv.category_id} notify={notify} onChanged={(id) => setDetail((d) => d && d.inv.id === detail.inv.id ? { ...d, inv: { ...d.inv, category_id: id } } : d)} /> : null}
                             {detail.inv.customer_name ? <div className="close-line"><span>العميل</span><b>{detail.inv.customer_name}</b></div> : null}
+                            {detail.state === 'loading' ? <div style={{ fontSize: 13, color: 'var(--muted)', margin: '10px 0 0' }}>{detail.items.length ? 'بيتحدّث من السيرفر…' : 'جاري تحميل الأصناف…'}</div> : null}
+                            {detail.state === 'failed' ? <div style={{ margin: '10px 0' }}><div className="err-box">الأصناف ماتحمّلتش.</div><button className="btn btn-ghost btn-block" style={{ marginTop: 6 }} onClick={() => openInvoice(detail.inv.id, detail.inv)}>جرّب تاني</button></div> : null}
                             <div style={{ margin: '10px 0' }}>
                                 {detail.items.map((it, i) => (
                                     <div className="close-line" key={i}>
@@ -458,12 +496,14 @@ export default function App() {
                             {detail.inv.discount > 0 ? <div className="close-line"><span>خصم الفاتورة</span><b>-{fmt(detail.inv.discount)} ج</b></div> : null}
                             <div className="close-line" style={{ fontSize: 17 }}><span>الإجمالي</span><b>{fmt(detail.inv.total)} ج</b></div>
                             <div style={{ display: 'grid', gap: 8, marginTop: 12 }}>
+                                {detail.state === 'ready' ? <>
                                 {uip.r80 ? <button className="btn btn-blue btn-block" onClick={() => setPrintJob({ ...detail, mode: 'r80' })}>🖨️ طباعة إيصال (80مم)</button> : null}
                                 {uip.pdf ? <button className="btn btn-ghost btn-block" onClick={() => setPrintJob({ ...detail, mode: 'a4' })}>📄 طباعة / PDF (A4)</button> : null}
                                 <BtPrint inv={detail.inv} items={detail.items} logo={logo} notify={notify} />
                                 {uip.wa ? <button className="btn btn-wa btn-block" onClick={() => waShare(detail.inv, detail.items)}>إرسال واتساب</button> : null}
                                 <SharePdf inv={detail.inv} items={detail.items} logo={logo} notify={notify} />
                                 {manager && detail.inv.status !== 'voided' ? <button className="btn btn-danger btn-block" onClick={() => voidInvoice(detail.inv.id)}>إلغاء الفاتورة</button> : null}
+                                </> : null}
                             </div>
                         </div>
                     </div>

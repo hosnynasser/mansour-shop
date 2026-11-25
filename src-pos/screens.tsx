@@ -28,7 +28,7 @@ const norm = (t: string) => (t || '').toLowerCase().replace(/[\u064B-\u0652\u064
 const smartMatch = (hay: string, q: string) => { const t = norm(q); if (!t) return true; const h = norm(hay); return t.split(' ').every((w) => h.includes(w)); };
 
 // ---------- فواتير ----------
-export function InvoicesScreen({ staff, openInvoice, openQuote, notify, initialView, startQuote }: { initialView?: 'mine' | 'quotes'; startQuote?: () => void; staff: Staff; openInvoice: (id: number) => void; openQuote: (id: number) => void; notify: (m: string, b?: boolean) => void }) {
+export function InvoicesScreen({ staff, openInvoice, openQuote, notify, initialView, startQuote }: { initialView?: 'mine' | 'quotes'; startQuote?: () => void; staff: Staff; openInvoice: (id: number, row?: Invoice) => void; openQuote: (id: number) => void; notify: (m: string, b?: boolean) => void }) {
     const [list, setList] = useState<Invoice[]>([]);
     const [quotes, setQuotes] = useState<Quote[]>([]);
     const [view, setView] = useState<'mine' | 'all' | 'quotes'>(initialView || 'mine');
@@ -150,7 +150,7 @@ export function InvoicesScreen({ staff, openInvoice, openQuote, notify, initialV
                 ))
             ) : (
                 loading ? <div className="empty">جاري التحميل…</div> : list.length === 0 ? <div className="empty">مفيش فواتير لسه</div> : list.map((v) => (
-                    <button key={v.id} className="inv-row" style={{ width: '100%', border: '1.5px solid var(--line)', textAlign: 'start' }} onClick={() => openInvoice(v.id)}>
+                    <button key={v.id} className="inv-row" style={{ width: '100%', border: '1.5px solid var(--line)', textAlign: 'start' }} onClick={() => openInvoice(v.id, v)}>
                         <div className={v.status === 'voided' ? 'voided' : ''}>
                             <div className="n">{v.num} {v.status === 'voided' ? '(ملغاة)' : ''}</div>
                             <div className="m">{fmtTime(v.ts)} · {v.staff}{v.customer_name ? ' · ' + v.customer_name : ''}</div>
