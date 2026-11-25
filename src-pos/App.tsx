@@ -41,11 +41,10 @@ function SettingsArea({ sub, setSub, staff, manager, chqAlerts, notify, categori
     categories: string[]; products: Product[]; refresh: () => void; onChequesChanged: () => void; onLogout: () => void;
 }) {
     const items: { id: Sub; icon: string; label: string; mgr?: boolean }[] = [
-        { id: 'close', icon: 'calc', label: 'التقفيلة' },
         { id: 'purchases', icon: 'truck', label: 'المشتريات والموردين والشيكات', mgr: true },
+        { id: 'close', icon: 'calc', label: 'التقفيلة' },
         { id: 'reports', icon: 'chart', label: 'التقارير', mgr: true },
         { id: 'staff', icon: 'users', label: 'الحسابات والموظفين' },
-        { id: 'cats', icon: 'tag', label: 'تصنيفات الأصناف', mgr: true },
     ];
     if (sub !== 'menu') {
         const cur = items.find((i) => i.id === sub);
