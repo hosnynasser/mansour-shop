@@ -11,7 +11,7 @@ import PayrollHub from './PayrollScreen';
 import Icon from './Icon';
 import SharePdf from './SharePdf';
 import BtPrint from './BtPrint';
-import { UiPrefsCard, loadUiPrefs, useUiPrefs } from './uiPrefs';
+import { loadUiPrefs, useUiPrefs } from './uiPrefs';
 import { InvoiceCategoryPicker } from './InvoiceCategories';
 import logo from '../src/photos/logo-mansour.png';
 
@@ -25,7 +25,6 @@ function SettingsArea({ sub, setSub, staff, manager, chqAlerts, notify, categori
         { id: 'reports', icon: 'chart', label: 'التقارير', mgr: true },
         { id: 'staff', icon: 'users', label: 'الحسابات والموظفين' },
         { id: 'cats', icon: 'tag', label: 'تصنيفات الأصناف', mgr: true },
-        { id: 'invset', icon: 'settings', label: 'إعدادات الفواتير', mgr: true },
     ];
     if (sub !== 'menu') {
         const cur = items.find((i) => i.id === sub);
@@ -38,7 +37,6 @@ function SettingsArea({ sub, setSub, staff, manager, chqAlerts, notify, categori
                 {sub === 'reports' && manager ? <ReportsScreen notify={notify} /> : null}
                 {sub === 'staff' ? <AccountsHub me={staff} manager={manager} notify={notify} /> : null}
                 {sub === 'account' ? <AccountScreen staff={staff} notify={notify} /> : null}
-                {sub === 'invset' && manager ? <UiPrefsCard notify={notify} /> : null}
                 {sub === 'cats' && manager ? <CategoriesScreen categories={categories} products={products} refresh={refresh} notify={notify} /> : null}
             </>
         );

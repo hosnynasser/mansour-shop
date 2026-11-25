@@ -337,3 +337,13 @@ html.dd-lock,html.dd-lock body,html.dd-lock #root,html.dd-lock .pos-main{overflo
 .inv-filter-menu{position:absolute;right:0;top:calc(100% + 4px);width:190px;max-width:calc(100vw - 40px);z-index:20;background:#fff;border:1.5px solid var(--line);border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.15);max-height:220px;overflow-y:auto;padding:6px}
 .inv-filter-menu button{display:block;width:100%;padding:10px 12px;text-align:start;border:0;border-radius:8px;background:transparent;color:var(--navy);font:inherit;font-weight:700;overflow-wrap:anywhere}
 .inv-filter-menu button.on{background:var(--bg);color:var(--navy)}
+
+.stock-card{flex-direction:column;align-items:stretch;gap:8px}
+.stock-card .sc-top{display:flex;align-items:flex-start;gap:10px}
+.stock-card .sc-top .sn{flex:1;min-width:0}
+.stock-card .sc-edit{flex:none;padding:6px 12px}
+.stock-card .sc-body{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.stock-card .sc-qty{min-width:48px;font-size:18px;color:var(--navy)}
+.stock-card .sc-cat{flex:1;min-width:120px;margin-top:0;font-size:14px;padding:8px}
+.stock-card .sc-catname{font-size:13px;color:var(--muted)}
+.stock-card .sc-actions{display:flex;gap:8px;flex-wrap:wrap;border-top:1px solid var(--line);padding-top:8px}

@@ -37,6 +37,7 @@ export function InvoicesScreen({ staff, openInvoice, openQuote, notify, initialV
     const [query, setQuery] = useState('');
     const [filtersOpen, setFiltersOpen] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
+    const [setPage, setSetPage] = useState<'' | 'cats' | 'print'>('');
     const requestVersion = useRef(0);
     const [cats, setCats] = useState<{ id: number; name: string }[]>([]);
     const [category, setCategory] = useState('');
@@ -102,7 +103,7 @@ export function InvoicesScreen({ staff, openInvoice, openQuote, notify, initialV
                     <button className={view !== 'quotes' ? 'on' : ''} onClick={() => setView(manager && view === 'all' ? 'all' : 'mine')}>{view === 'all' ? 'الفواتير' : 'فواتيري'}</button>
                     <button className={view === 'quotes' ? 'on' : ''} onClick={() => setView('quotes')}>عروض الأسعار</button>
                 </div>
-                {manager ? <button className="btn btn-ghost" aria-label="إعدادات الفواتير" style={{ flex: 'none', minWidth: 46, padding: '0 10px', fontSize: 20 }} onClick={() => setSettingsOpen(true)}>⚙️</button> : null}
+                {manager ? <button className="btn btn-ghost" aria-label="إعدادات الفواتير" style={{ flex: 'none', minWidth: 46, padding: '0 10px', fontSize: 20 }} onClick={() => { setSetPage(''); setSettingsOpen(true); }}>⚙️</button> : null}
             </div>
             {view !== 'quotes' ? <>
                 <div style={{ position: 'relative', marginBottom: 10 }}>
@@ -124,8 +125,15 @@ export function InvoicesScreen({ staff, openInvoice, openQuote, notify, initialV
             </> : null}
             {settingsOpen && manager ? <>
                 <div className="sheet-back" onClick={() => setSettingsOpen(false)} />
-                <div className="sheet"><div className="sheet-h"><h3>إعدادات الفواتير</h3><button className="btn btn-ghost btn-sm" style={{ marginInlineStart: 'auto' }} onClick={() => setSettingsOpen(false)}>قفل</button></div>
-                    <div className="sheet-b"><InvoiceCategoriesManager notify={notify} onChanged={() => { loadCats(); load(); }} /><UiPrefsCard notify={notify} /></div>
+                <div className="sheet"><div className="sheet-h">{setPage ? <button className="btn btn-ghost btn-sm" onClick={() => setSetPage('')}>رجوع</button> : null}<h3>{setPage === 'cats' ? 'التصنيفات' : setPage === 'print' ? 'الطباعة' : 'إعدادات الفواتير'}</h3><button className="btn btn-ghost btn-sm" style={{ marginInlineStart: 'auto' }} onClick={() => setSettingsOpen(false)}>قفل</button></div>
+                    <div className="sheet-b">
+                        {setPage === '' ? <div style={{ display: 'grid', gap: 8 }}>
+                            <button className="menu-row" onClick={() => setSetPage('cats')}><span className="ico-tile"><Icon n="tag" size={20} /></span><span className="ml">التصنيفات</span><Icon n="chev" size={18} /></button>
+                            <button className="menu-row" onClick={() => setSetPage('print')}><span className="ico-tile"><Icon n="settings" size={20} /></span><span className="ml">الطباعة</span><Icon n="chev" size={18} /></button>
+                        </div> : null}
+                        {setPage === 'cats' ? <InvoiceCategoriesManager notify={notify} onChanged={() => { loadCats(); load(); }} /> : null}
+                        {setPage === 'print' ? <UiPrefsCard notify={notify} /> : null}
+                    </div>
                 </div>
             </> : null}
             {view === 'quotes' && startQuote ? <button className="btn btn-amber btn-block" style={{ marginBottom: 10 }} onClick={startQuote}>➕ إضافة عرض سعر</button> : null}
@@ -259,6 +267,7 @@ export function StockScreen({ staff, products, categories, refresh, notify }: { 
     const [q, setQ] = useState('');
     const [edit, setEdit] = useState<Record<string, string>>({});
     const [busy, setBusy] = useState('');
+    const [editCode, setEditCode] = useState<string | null>(null);
     const [scanFor, setScanFor] = useState<string | null>(null);
 
     const saveBarcode = async (code: string, barcode: string) => {
@@ -381,40 +390,44 @@ export function StockScreen({ staff, products, categories, refresh, notify }: { 
             </div>
             {manager ? <button className="btn btn-amber btn-block" style={{ marginBottom: 10 }} onClick={() => setForm({ mode: 'add', name: '', code: '', price: '', cost: '', qty: '', cat: '' })}><Icon n="plus" size={18} /> إضافة صنف جديد</button> : null}
             {!manager ? <div className="err-box" style={{ background: '#fff8ea', color: 'var(--amber-d)' }}>عرض فقط — تعديل الأرصدة للمدير</div> : null}
-            {filtered.slice(0, shown).map((p) => (
-                <div className="stock-row" key={p.code}>
-                    <div className="sn"><PN t={p.name} /><span>{p.code}{(p as any).barcode ? ' · 🏷️ ' + (p as any).barcode : ''}</span>
-                        {manager && categories.length > 0 ? (
-                            <select className="cat-sel" value={categories.includes(p.cat) ? p.cat : ''} onChange={(e) => setCat(p.code, e.target.value)}>
-                                <option value="">— بدون تصنيف —</option>
-                                {categories.map((c) => <option key={c} value={c}>{c}</option>)}
-                            </select>
-                        ) : (p.cat ? <span>{p.cat}</span> : null)}
+            {filtered.slice(0, shown).map((p) => {
+                const editing = manager && editCode === p.code;
+                const dirty = edit[p.code] !== undefined && edit[p.code] !== String(p.qty);
+                return (
+                <div className="stock-row stock-card" key={p.code}>
+                    <div className="sc-top">
                         {manager ? (
-                            <span style={{ display: 'flex', gap: 6, marginTop: 4 }}>
-                                <button className="btn btn-ghost btn-sm" style={{ padding: '2px 10px' }} onClick={() => setForm({ mode: 'edit', name: p.name, code: p.code, price: String(p.price), cost: String((p as any).cost ?? ''), qty: '', cat: '' })}><Icon n="edit" size={15} /> تعديل</button>
-                                <button className="btn btn-ghost btn-sm" style={{ padding: '2px 10px', color: 'var(--danger)' }} onClick={() => delProduct(p)}><Icon n="trash" size={16} /></button>
-                            </span>
+                            <button className={'btn btn-sm sc-edit ' + (editing ? 'btn-blue' : 'btn-ghost')} aria-label={editing ? 'تم' : 'تعديل'} onClick={() => { if (editing) { setEditCode(null); setEdit((x) => { const n = { ...x }; delete n[p.code]; return n; }); } else setEditCode(p.code); }}>{editing ? <>✓ تم</> : <><Icon n="edit" size={15} /> تعديل</>}</button>
                         ) : null}
+                        <div className="sn"><PN t={p.name} /><span>{p.code}{(p as any).barcode ? ' · 🏷️ ' + (p as any).barcode : ''}</span></div>
                     </div>
-                    {manager ? (
-                        <>
-                            <button className="btn btn-ghost btn-sm" onClick={() => setScanFor(p.code)} title="ربط باركود"><Icon n="camera" size={18} /></button>
+                    <div className="sc-body">
+                        {editing ? (
                             <input
                                 inputMode="numeric"
                                 title="الرصيد"
                                 value={edit[p.code] !== undefined ? edit[p.code] : String(p.qty)}
                                 onChange={(e) => setEdit((x) => ({ ...x, [p.code]: e.target.value }))}
                             />
-                            {(edit[p.code] !== undefined && edit[p.code] !== String(p.qty)) ? (
-                                <button className="btn btn-blue btn-sm" disabled={busy === p.code} onClick={() => save(p.code)}>{busy === p.code ? '…' : 'حفظ'}</button>
-                            ) : null}
-                        </>
-                    ) : (
-                        <b style={{ minWidth: 40, textAlign: 'center' }}>{p.qty}</b>
-                    )}
+                        ) : <b className="sc-qty">{p.qty}</b>}
+                        {editing ? <button className="btn btn-ghost btn-sm" onClick={() => setScanFor(p.code)} title="ربط باركود"><Icon n="camera" size={18} /></button> : null}
+                        {editing && categories.length > 0 ? (
+                            <select className="cat-sel sc-cat" value={categories.includes(p.cat) ? p.cat : ''} onChange={(e) => setCat(p.code, e.target.value)}>
+                                <option value="">— بدون تصنيف —</option>
+                                {categories.map((c) => <option key={c} value={c}>{c}</option>)}
+                            </select>
+                        ) : (p.cat ? <span className="sc-catname">{p.cat}</span> : null)}
+                    </div>
+                    {editing ? (
+                        <div className="sc-actions">
+                            {dirty ? <button className="btn btn-blue btn-sm" disabled={busy === p.code} onClick={() => save(p.code)}>{busy === p.code ? '…' : 'حفظ الكمية'}</button> : null}
+                            <button className="btn btn-ghost btn-sm" onClick={() => setForm({ mode: 'edit', name: p.name, code: p.code, price: String(p.price), cost: String((p as any).cost ?? ''), qty: '', cat: '' })}><Icon n="edit" size={15} /> الاسم والسعر</button>
+                            <button className="btn btn-ghost btn-sm" style={{ color: 'var(--danger)' }} aria-label="حذف الصنف" onClick={() => delProduct(p)}><Icon n="trash" size={16} /></button>
+                        </div>
+                    ) : null}
                 </div>
-            ))}
+                );
+            })}
             <MoreSentinel shown={shown} total={filtered.length} more={() => setShown((n) => n + STOCK_N)} />
             {stOpen ? (
                 <>
