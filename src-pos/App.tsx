@@ -423,7 +423,7 @@ export default function App() {
                 {tab === 'sell' ? <SellScreen quoteMode={quoteMode} onQuoteExit={(saved) => { setQuoteMode(false); setInvView('quotes'); setTab('invoices'); setSub('menu'); }} presetCust={sellCust} onPresetUsed={() => setSellCust(0)} products={products} categories={categories} onDone={(inv, items, timing) => { setDone({ inv, items, timing }); }} onNeedRefresh={refreshProducts} notify={notify} /> : null}
                 {tab === 'invoices' ? <InvoicesScreen staff={staff} openInvoice={openInvoice} openQuote={openQuote} notify={notify} initialView={invView} startQuote={() => { setQuoteMode(true); setTab('sell'); setSub('menu'); }} /> : null}
                 {tab === 'customers' ? <CustomersScreen staff={staff} openInvoice={openInvoice} notify={notify} startDebtInvoice={(id) => { setSellCust(id); setTab('sell'); setSub('menu'); }} /> : null}
-                {tab === 'stock' ? <StockScreen staff={staff} products={products} categories={categories} refresh={refreshProducts} notify={notify} /> : null}
+                {tab === 'stock' ? <StockScreen staff={staff} products={products} categories={categories} refresh={refreshProducts} notify={notify} catsScreen={staff.role === 'manager' ? <CategoriesScreen categories={categories} products={products} refresh={refreshProducts} notify={notify} /> : undefined} /> : null}
                 {tab === 'settings' ? (
                     <SettingsArea sub={sub} setSub={setSub} staff={staff} manager={manager} chqAlerts={chqAlerts} notify={notify}
                         categories={categories} products={products} refresh={refreshProducts}

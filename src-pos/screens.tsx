@@ -262,7 +262,7 @@ function fmtTx(ts: string) {
     } catch { return fmtTime(ts); }
 }
 
-export function StockScreen({ staff, products, categories, refresh, notify }: { staff: Staff; products: Product[]; categories: string[]; refresh: () => void; notify: (m: string, b?: boolean) => void }) {
+export function StockScreen({ staff, products, categories, refresh, notify, catsScreen }: { catsScreen?: React.ReactNode; staff: Staff; products: Product[]; categories: string[]; refresh: () => void; notify: (m: string, b?: boolean) => void }) {
     const manager = staff.role === 'manager';
     const [q, setQ] = useState('');
     const [edit, setEdit] = useState<Record<string, string>>({});
@@ -321,7 +321,9 @@ export function StockScreen({ staff, products, categories, refresh, notify }: { 
 
     const [minEdit, setMinEdit] = useState<Record<string, string>>({});
     const [stOpen, setStOpen] = useState(false);
-    useEffect(() => { if (!stOpen) setMinEdit({}); }, [stOpen]);
+    const [stPage, setStPage] = useState<'' | 'low' | 'cats'>('');
+    useEffect(() => { if (!stOpen) { setMinEdit({}); setStPage(''); } }, [stOpen]);
+    useEffect(() => { if (stPage !== 'low') setMinEdit({}); }, [stPage]);
     const [stQ, setStQ] = useState('');
     const [setShownN, setSetShownN] = useState(60);
     const [minBusy, setMinBusy] = useState('');
@@ -433,8 +435,14 @@ export function StockScreen({ staff, products, categories, refresh, notify }: { 
                 <>
                     <div className="sheet-back" onClick={() => setStOpen(false)} />
                     <div className="sheet">
-                        <div className="sheet-h"><h3>إعدادات المخزون</h3><button className="btn btn-ghost btn-sm" style={{ marginInlineStart: 'auto' }} onClick={() => setStOpen(false)}>قفل</button></div>
+                        <div className="sheet-h">{stPage ? <button className="btn btn-ghost btn-sm" onClick={() => setStPage('')}>رجوع</button> : null}<h3>{stPage === 'low' ? 'النواقص' : stPage === 'cats' ? 'التصنيفات' : 'إعدادات المخزون'}</h3><button className="btn btn-ghost btn-sm" style={{ marginInlineStart: 'auto' }} onClick={() => setStOpen(false)}>قفل</button></div>
                         <div className="sheet-b">
+                            {stPage === '' ? <div style={{ display: 'grid', gap: 8 }}>
+                                <button className="menu-row" onClick={() => setStPage('low')}><span className="ico-tile"><Icon n="box" size={20} /></span><span className="ml">النواقص</span><Icon n="chev" size={18} /></button>
+                                {catsScreen ? <button className="menu-row" onClick={() => setStPage('cats')}><span className="ico-tile"><Icon n="tag" size={20} /></span><span className="ml">التصنيفات</span><Icon n="chev" size={18} /></button> : null}
+                            </div> : null}
+                            {stPage === 'cats' ? catsScreen : null}
+                            {stPage === 'low' ? <>
                             <span hidden data-dirty={minDirty ? '1' : '0'} />
                             <h4 style={{ margin: '0 0 4px' }}>حد النواقص</h4>
                             <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 8 }}>لو رصيد الصنف وصل للرقم ده أو أقل، بيدخل في النواقص. القيم الحالية زي ما هي، وبتتغير هنا بس.</div>
@@ -454,6 +462,7 @@ export function StockScreen({ staff, products, categories, refresh, notify }: { 
                                 );
                             })}
                             {products.filter((p) => smartMatch(p.name + ' ' + p.code, stQ)).length > setShownN ? <button className="btn btn-ghost btn-block" onClick={() => setSetShownN((n) => n + 60)}>عرض المزيد</button> : null}
+                            </> : null}
                         </div>
                     </div>
                 </>
