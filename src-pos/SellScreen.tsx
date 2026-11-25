@@ -94,6 +94,8 @@ export default function SellScreen({
     const count = cart.reduce((s, l) => s + l.qty, 0);
 
     useEffect(() => { if (quoteMode) { setPayment('cash'); setCustId(0); setPickOpen(false); } }, [quoteMode]);
+    const nameRef = useRef<HTMLInputElement>(null);
+    useEffect(() => { if (pickOpen) nameRef.current?.focus(); else setCustQ(''); }, [pickOpen]);
     const togglePick = async () => {
         setPickOpen((v) => !v);
         if (customers === null) { try { const r = await api('/api/pos/customers'); setCustomers(r.customers || []); } catch { notify('مشكلة في تحميل العملاء', true); setCustomers([]); } }
@@ -290,7 +292,7 @@ export default function SellScreen({
                                 <div className="field">
                                     <label>اسم العميل{payment === 'debt' ? '' : ' (اختياري)'}</label>
                                     <div className="cust-dd-wrap" style={{ position: 'relative', marginBottom: 12 }}>
-                                        <input value={selCust ? selCust.name : payment === 'debt' ? '' : custName} readOnly={!!custId || payment === 'debt'} onChange={(e) => setCustName(e.target.value)} placeholder={payment === 'debt' ? 'اختار عميل من القايمة' : 'اسم العميل'} onClick={() => { if (custId || payment === 'debt') togglePick(); }} style={{ width: '100%', paddingLeft: custId ? 112 : 58 }} />
+                                        <input ref={nameRef} value={pickOpen ? custQ : selCust ? selCust.name : payment === 'debt' ? '' : custName} readOnly={!pickOpen && (!!custId || payment === 'debt')} onChange={(e) => { if (pickOpen) setCustQ(e.target.value); else setCustName(e.target.value); }} placeholder={pickOpen ? 'ابحث عن عميل…' : payment === 'debt' ? 'اختار عميل من القايمة' : 'اسم العميل'} onClick={() => { if (!pickOpen && (custId || payment === 'debt')) togglePick(); }} style={{ width: '100%', paddingLeft: custId ? 112 : 58 }} />
                                         <button className="btn btn-navy btn-sm" aria-label="اختيار عميل من الموجودين" title="اختيار عميل من الموجودين" style={{ position: 'absolute', left: 5, top: 5, bottom: 5, width: 46, minHeight: 0, padding: 0, justifyContent: 'center' }} onClick={togglePick}>
                                             <span style={{ fontSize: 16, lineHeight: 1, display: 'inline-block', transform: pickOpen ? 'rotate(180deg)' : 'none' }}>▾</span>
                                         </button>
@@ -299,10 +301,10 @@ export default function SellScreen({
                                         <>
                                             <div className="cat-dd-back" onClick={() => setPickOpen(false)} />
                                             <div className="cat-dd-list cust-dd" role="listbox" aria-label="العملاء">
-                                                <div className="cust-dd-search"><input placeholder="ابحث عن عميل…" value={custQ} onChange={(e) => setCustQ(e.target.value)} /></div>
+                                                
                                                 {customers === null ? <div className="cust-dd-empty">جاري تحميل العملاء…</div> : null}
                                                 {(customers || []).filter((c) => !custQ.trim() || c.name.toLowerCase().includes(custQ.trim().toLowerCase()) || c.phone.includes(custQ.trim())).slice(0, 40).map((c) => (
-                                                    <button key={c.id} role="option" aria-selected={custId === c.id} className={custId === c.id ? 'on' : ''} onClick={() => { setCustId(c.id); setCustName(''); setPickOpen(false); }}>
+                                                    <button key={c.id} role="option" aria-selected={custId === c.id} className={custId === c.id ? 'on' : ''} onClick={() => { setCustId(c.id); setCustName(''); setPickOpen(false); nameRef.current?.blur(); }}>
                                                         <span className="cd-n"><b>{c.name}</b>{c.phone ? <small dir="ltr">{c.phone}</small> : null}</span>
                                                         {(c.balance || 0) > 0 ? <span className="cd-b">عليه {fmt(c.balance!)}</span> : null}
                                                     </button>
