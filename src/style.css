@@ -586,3 +586,28 @@ body{background:#0b1c31}
 
 /* ترتيب أزرار الفوتر: زر الاتصال في سطر والأيقونات تحته */
 @media(max-width:760px){.footer-actions{flex-direction:column;gap:12px}.footer-icons{order:2}}
+
+/* ============ v16: كروت المنتجات والبحث والفلاتر زجاجية على الكحلي ============ */
+.product-card{background:rgba(255,255,255,.09);border:1px solid rgba(255,255,255,.17);-webkit-backdrop-filter:blur(18px) saturate(140%);backdrop-filter:blur(18px) saturate(140%);box-shadow:inset 0 1px 0 rgba(255,255,255,.1),0 12px 28px rgba(3,10,20,.28)}
+.product-card:hover{background:rgba(255,255,255,.1);box-shadow:inset 0 1px 0 rgba(255,255,255,.14),0 18px 36px rgba(3,10,20,.38)}
+.product-info h3{color:#fff}
+.product-info p{color:#a9bdd2}
+.price{color:var(--amber)}
+.price small{color:#9db1c7}
+.qty-step button{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.22);color:#fff}
+.qty-step button:hover{background:rgba(255,255,255,.2)}
+.qty-step b{color:#fff}
+.ask-btn{background:rgba(242,184,75,.18);color:#f8d18a;border:1px solid rgba(242,184,75,.4)}
+.ask-btn:hover{background:rgba(242,184,75,.3);color:#ffe4b3}
+.ask-btn.out-note{background:rgba(255,255,255,.08);color:#9db1c7;border:1px solid rgba(255,255,255,.16)}
+
+/* خانة البحث والفلاتر */
+.search-box{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);color:var(--amber);-webkit-backdrop-filter:blur(14px) saturate(150%);backdrop-filter:blur(14px) saturate(150%);box-shadow:0 18px 40px rgba(3,10,20,.3),inset 0 1px 0 rgba(255,255,255,.18)}
+.search-box:focus-within{box-shadow:0 0 0 3px rgba(242,184,75,.5),0 18px 40px rgba(3,10,20,.35)}
+.search-box input{color:#fff}
+.search-box input::placeholder{color:rgba(255,255,255,.62)}
+.clear-btn{background:rgba(255,255,255,.16);color:#e8f0f8}
+.toolbar select{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.22);color:#fff;-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px)}
+.toolbar select option{background:#fff;color:var(--ink)}
+.empty-state{color:#b9c9da}
+.empty-state h3{color:#fff}
