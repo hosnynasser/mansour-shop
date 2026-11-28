@@ -1072,6 +1072,17 @@ export function App() {
         };
     }, []);
 
+    // الهيدر شفاف فوق خلفية الهيرو وبيبقى كحلي لما الصفحة تنزل
+    const [scrolled, setScrolled] = useState(false);
+    useEffect(() => {
+        const el = document.querySelector('.app-main');
+        if (!el) return;
+        const onScroll = () => setScrolled(el.scrollTop > 8);
+        onScroll();
+        el.addEventListener('scroll', onScroll, { passive: true });
+        return () => el.removeEventListener('scroll', onScroll);
+    }, []);
+
     const showToast = (msg: string) => {
         setToast(msg);
         window.clearTimeout((showToast as any).t);
@@ -1096,7 +1107,7 @@ export function App() {
         <CartCtx.Provider value={{ cart, add, setQty, open: () => setCartOpen(true) }}>
             <div dir="rtl" className="app-shell">
                 <IconSprite />
-                <header className="site-header">
+                <header className={'site-header' + (scrolled ? ' is-solid' : '')}>
                     <NavLink className="brand" to="/" end aria-label="MANSOUR - الصفحة الرئيسية">
                         <img src={logo} alt="لوجو منصور" />
                         <span><b>MANSOUR</b><small>{shop.tagline}</small></span>
