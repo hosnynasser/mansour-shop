@@ -577,3 +577,12 @@ body{background:#0b1c31}
 .footer-admin:hover{background:rgba(255,255,255,.15);color:#fff}
 .footer-admin:active{transform:scale(.97)}
 @media(max-width:420px){.footer-panel{border-radius:26px}}
+
+/* ============ v15: الفوتر بعرض الشاشة من الجنبين، حواف مدورة من فوق بس ============ */
+.footer{padding:22px 0 0}
+.footer-panel{max-width:none;width:100%;border-radius:30px 30px 0 0;border-left:0;border-right:0;border-bottom:0;padding:32px 20px calc(120px + env(safe-area-inset-bottom))}
+@media(min-width:1001px){.footer{padding:28px 0 0}.footer-panel{padding:34px 24px 46px;border-radius:34px 34px 0 0}}
+@media(max-width:420px){.footer-panel{border-radius:24px 24px 0 0}}
+
+/* ترتيب أزرار الفوتر: زر الاتصال في سطر والأيقونات تحته */
+@media(max-width:760px){.footer-actions{flex-direction:column;gap:12px}.footer-icons{order:2}}
