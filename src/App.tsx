@@ -285,13 +285,29 @@ function HeaderCallLink({ className, children, ...rest }: any) {
     return <a href={links.phoneHref} className={className} {...rest}>{children}</a>;
 }
 
-function FooterPhones() {
+function SiteFooter({ onAdmin }: { onAdmin: () => void }) {
     const site = useSite();
     const links = useSiteLinks();
-    return <>
-        <a className="footer-phone" href={links.phoneHref}>{site.phone}</a>
-        {site.phone2 && <a className="footer-phone" href={'tel:+' + egyptIntl(site.phone2)}>{site.phone2}</a>}
-    </>;
+    return <footer className="footer">
+        <div className="footer-panel">
+            <div className="footer-brand">
+                <img src={logo} alt="لوجو منصور" />
+                <span><b>MANSOUR</b><small>{shop.tagline}</small></span>
+            </div>
+            <p className="footer-legal">{shop.legalName}</p>
+            <div className="footer-actions">
+                <a className="footer-call" href={links.phoneHref}><Ic id="i-phone" />{site.phone}</a>
+                {site.phone2 && <a className="footer-call2" href={'tel:+' + egyptIntl(site.phone2)}>{site.phone2}</a>}
+                <div className="footer-icons">
+                    <a className="footer-ico wa" href={links.whatsappHref} target="_blank" rel="noreferrer" aria-label="تواصل على واتساب"><Ic id="i-wa" /></a>
+                    <a className="footer-ico" href={links.phoneHref} aria-label="اتصل بالمحل"><Ic id="i-phone" /></a>
+                    <a className="footer-ico" href={links.mapsHref} target="_blank" rel="noreferrer" aria-label="الموقع على الخريطة"><Ic id="i-pin" /></a>
+                </div>
+            </div>
+            <small className="footer-copy">© 2026 MANSOUR. جميع الحقوق محفوظة.</small>
+            <button type="button" className="footer-admin" onClick={onAdmin}>لوحة التحكم</button>
+        </div>
+    </footer>;
 }
 
 function WaFloat() {
@@ -1128,13 +1144,7 @@ export function App() {
                         <Route path="/" element={<Home />} />
                         <Route path="/products" element={<Products onOpen={setDlgProduct} />} />
                     </Routes>
-                    <footer className="footer">
-                        <div className="footer-brand"><img src={logo} alt="" /><span>MANSOUR</span></div>
-                        <p>{shop.legalName}</p>
-                        <FooterPhones />
-                        <small>© 2026 MANSOUR. جميع الحقوق محفوظة.</small>
-                        <button type="button" className="footer-admin" onClick={() => setAdminOpen(true)}>لوحة التحكم</button>
-                    </footer>
+                    <SiteFooter onAdmin={() => setAdminOpen(true)} />
                 </main>
 
                 <WaFloat />

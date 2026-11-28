@@ -535,3 +535,38 @@ body{background:#0b1c31}
   .bn.active{color:#2b1c00;background:var(--amber);box-shadow:0 8px 18px rgba(242,184,75,.35)}
   .bn.wa{color:#fff}
 }
+
+/* ============ v13: فوتر مميز + آراء عملاء زجاجية ============ */
+/* آراء العملاء: زجاج شفاف على الكحلي، من غير إطار أبيض */
+.review-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);border-radius:var(--r-lg);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);box-shadow:inset 0 1px 0 rgba(255,255,255,.12)}
+.review-card:hover{background:rgba(255,255,255,.09)}
+.review-stars{color:var(--amber)}
+.review-card p{color:#dbe7f4}
+.review-card b{color:#fff}
+.review-card small.rev-role{color:#9db1c7}
+
+/* الفوتر: لوحة زجاجية بحافة ذهبية خفيفة ولمعة */
+.footer{background:transparent;border-top:0;display:flex;justify-content:center;padding:22px 16px 40px;color:#cfdcea}
+.footer-panel{position:relative;isolation:isolate;overflow:hidden;width:100%;max-width:540px;text-align:center;padding:28px 22px 24px;border-radius:var(--r-lg);border:1px solid rgba(242,184,75,.42);background:linear-gradient(165deg,rgba(255,255,255,.12),rgba(255,255,255,.04) 46%,rgba(255,255,255,.08));-webkit-backdrop-filter:blur(18px) saturate(150%);backdrop-filter:blur(18px) saturate(150%);box-shadow:0 24px 54px rgba(3,10,20,.45),inset 0 1px 0 rgba(255,255,255,.2),inset 0 0 0 1px rgba(242,184,75,.07),0 0 32px rgba(242,184,75,.1)}
+.footer-panel:before{content:"";position:absolute;z-index:-1;left:-10%;right:-10%;top:-55%;height:110%;background:radial-gradient(ellipse at 50% 0,rgba(242,184,75,.24),rgba(242,184,75,0) 62%);pointer-events:none}
+.footer-panel:after{content:"";position:absolute;z-index:-1;inset:0;background:linear-gradient(115deg,rgba(255,255,255,0) 38%,rgba(255,255,255,.1) 48%,rgba(255,255,255,0) 58%);pointer-events:none}
+.footer-brand{display:grid;justify-items:center;gap:8px}
+.footer-brand img{width:74px;height:74px;object-fit:contain;filter:drop-shadow(0 0 14px rgba(242,184,75,.6)) drop-shadow(0 6px 14px rgba(0,0,0,.35))}
+.footer-brand b{font-family:Arial,sans-serif;font-size:23px;letter-spacing:3px;font-weight:900;color:#fff}
+.footer-brand small{font-family:Arial,sans-serif;font-size:10px;letter-spacing:.6px;color:rgba(255,255,255,.62)}
+.footer-legal{margin:10px 0 0;font-size:13.5px;color:#cfdcea}
+.footer-actions{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:9px;margin:16px 0 4px}
+.footer-call{display:inline-flex;align-items:center;gap:9px;background:var(--amber);color:#2b1c00;font-family:Arial,sans-serif;direction:ltr;font-weight:900;font-size:16px;letter-spacing:.5px;padding:13px 20px;border-radius:var(--r-sm);box-shadow:0 12px 26px rgba(242,184,75,.35);transition:transform .15s,box-shadow .2s}
+.footer-call:hover{box-shadow:0 14px 32px rgba(242,184,75,.5)}
+.footer-call:active{transform:scale(.97)}
+.footer-call .ic{font-size:18px}
+.footer-call2{display:inline-flex;align-items:center;justify-content:center;direction:ltr;font-family:Arial,sans-serif;font-weight:800;font-size:15px;letter-spacing:.5px;color:#fff;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.24);padding:12px 18px;border-radius:var(--r-sm)}
+.footer-icons{display:flex;gap:8px}
+.footer-ico{width:46px;height:46px;display:grid;place-items:center;border-radius:50%;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.22);color:#fff;font-size:20px;transition:background .2s,transform .15s}
+.footer-ico:hover{background:rgba(255,255,255,.18)}
+.footer-ico:active{transform:scale(.94)}
+.footer-ico.wa{color:#3ddc8b}
+.footer-copy{display:block;margin-top:14px;font-size:11px;color:#93a8be}
+.footer-admin{margin-top:8px;padding:6px 10px;min-height:0;background:none;border:0;border-radius:0;color:rgba(255,255,255,.5);font-size:12px;font-weight:700;text-decoration:underline;text-underline-offset:3px;cursor:pointer}
+.footer-admin:hover{color:rgba(255,255,255,.8)}
+@media(max-width:1000px){.footer{padding:18px 14px calc(122px + env(safe-area-inset-bottom))}}
