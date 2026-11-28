@@ -498,3 +498,40 @@ body{background:#0b1c31}
 .footer{background:transparent;border-top:1px solid rgba(255,255,255,.1);color:#b9c9da}
 .footer small{color:#8fa3b8}
 #resultsCount{color:#c3d3e4}
+
+/* ============ v12: توحيد الهوية (كحلي + ذهبي + كروت بيضا) ============ */
+:root{--r-sm:12px;--r-md:18px;--r-lg:22px;--shadow-1:0 10px 26px rgba(4,14,28,.18);--shadow-2:0 18px 42px rgba(4,14,28,.3)}
+
+/* حواف موحدة */
+.btn,.header-cta,.header-cart,.ask-btn,.footer-admin,.toolbar select,.page-btn,.cart-qty button{border-radius:var(--r-sm)}
+.search-box{border-radius:var(--r-md)}
+.product-card,.review-card{border-radius:var(--r-md)}
+.category-card,.contact-card,.map-frame,#productDialog,.modal{border-radius:var(--r-lg)}
+
+/* ظل واحد للكروت البيضا */
+.product-card,.review-card{box-shadow:var(--shadow-1)}
+.product-card:hover{box-shadow:var(--shadow-2)}
+
+/* الذهبي لون التمييز */
+.price,.dlg-price,.cart-line .cl-price{color:var(--amber-d)}
+.price small,.dlg-price small{color:#7c8798}
+.ask-btn{background:#fdf1da;color:#7a5205}
+.ask-btn:hover{background:#fbe6c2}
+.dlg-cat{background:#fdf1da;color:#7a5205}
+.btn-primary{background:var(--amber);color:#2b1c00;box-shadow:0 10px 26px rgba(242,184,75,.3)}
+.btn-primary:hover{box-shadow:0 12px 32px rgba(242,184,75,.45)}
+
+/* ترقيم الصفحات فوق الخلفية الكحلي */
+.page-btn{background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.2);color:#e8f0f8}
+.page-btn:hover{background:rgba(255,255,255,.16)}
+.page-btn.selected{background:var(--amber);border-color:var(--amber);color:#2b1c00}
+.page-btn:disabled{opacity:.35}
+
+/* الشريط السفلي: زجاج كحلي زي الهيدر، والتاب النشط ذهبي */
+@media(max-width:760px){
+  .bottom-nav{background:rgba(10,24,42,.78);-webkit-backdrop-filter:blur(16px) saturate(150%);backdrop-filter:blur(16px) saturate(150%);border-top:1px solid rgba(255,255,255,.14);box-shadow:0 -10px 26px rgba(3,10,20,.4);padding:8px 10px calc(8px + env(safe-area-inset-bottom));gap:4px}
+  .bn{border:0;background:none;font-family:inherit;color:rgba(255,255,255,.72);border-radius:14px;cursor:pointer;padding:8px 4px}
+  .bn .ic{font-size:21px}
+  .bn.active{color:#2b1c00;background:var(--amber);box-shadow:0 8px 18px rgba(242,184,75,.35)}
+  .bn.wa{color:#fff}
+}
