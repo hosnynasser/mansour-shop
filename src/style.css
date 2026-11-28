@@ -477,3 +477,24 @@ button.footer-admin{font-family:inherit}
 .oc-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
 .ochips{margin:8px 0 4px}
 .ochips .atab{font-size:13.5px;padding:9px 0}
+
+/* ============ تجربة: الخلفية المتحركة ورا الصفحة كلها ============ */
+body{background:#0b1c31}
+.app-shell{background:#0b1c31}
+.app-main{position:relative;z-index:1}
+.page-bg{position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden;background:linear-gradient(180deg,#091a2f 0%,#0f2a4a 42%,#123a5f 74%,#16406b 100%)}
+.page-bg:before{content:"";position:absolute;inset:0;background-image:radial-gradient(rgba(255,255,255,.07) 1px,transparent 1.3px);background-size:26px 26px;-webkit-mask-image:radial-gradient(ellipse at 50% 30%,#000 10%,transparent 78%);mask-image:radial-gradient(ellipse at 50% 30%,#000 10%,transparent 78%)}
+.hero,.products-hero{background:transparent}
+.hero:before,.products-hero:before{display:none}
+.hero-wave{display:none}
+.section h2,.about-list h3{color:#fff}
+.lead,.about-list p{color:#b9c9da}
+.about-list li{border-bottom-color:rgba(255,255,255,.12)}
+.about-list .ico{background:rgba(255,255,255,.1);color:#a9deff}
+.cat-band,.reviews-sec{background:transparent}
+.text-link{color:var(--amber)}
+.contact-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
+.map-frame{border-color:rgba(255,255,255,.16);background:rgba(255,255,255,.05)}
+.footer{background:transparent;border-top:1px solid rgba(255,255,255,.1);color:#b9c9da}
+.footer small{color:#8fa3b8}
+#resultsCount{color:#c3d3e4}

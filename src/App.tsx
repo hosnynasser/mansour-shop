@@ -217,7 +217,6 @@ function FxBg() {
 function Home() {
     return <>
         <section className="hero" id="home">
-            <FxBg />
             <div className="hero-inner">
                 <h1>كل احتياجاتك <em className="e">الكهربائية</em> و<em className="w">الصحية</em><br />في مكان واحد</h1>
                 <p className="hero-copy">في منصور هتلاقي مستلزمات الكهرباء والأدوات الصحية بجودة تختارها بثقة، وخدمة تساعدك تلاقي المناسب لشغلك وبيتك.</p>
@@ -231,7 +230,6 @@ function Home() {
                     <div><Ic id="i-pin" />حلوان، أطلس<br />أمام مسجد الروضة</div>
                 </div>
             </div>
-            <svg className="hero-wave" viewBox="0 0 1440 72" preserveAspectRatio="none" aria-hidden="true"><path d="M0 72V34C240 2 480 0 720 26s480 34 720 6V72z" fill="#fff" /></svg>
         </section>
 
         <section className="section about">
@@ -441,7 +439,6 @@ function Products({ onOpen }: { onOpen: (p: Product) => void }) {
 
     return <>
         <div className="products-hero">
-            <FxBg />
             <div className="ph-inner">
                 <h1>دور على اللي <em>محتاجه</em></h1>
                 <p>ابحث بالاسم أو النوع أو الكود، أو استخدم الفلاتر للوصول للمنتج بسهولة.</p>
@@ -1107,6 +1104,7 @@ export function App() {
         <CartCtx.Provider value={{ cart, add, setQty, open: () => setCartOpen(true) }}>
             <div dir="rtl" className="app-shell">
                 <IconSprite />
+                <div className="page-bg" aria-hidden="true"><FxBg /></div>
                 <header className={'site-header' + (scrolled ? ' is-solid' : '')}>
                     <NavLink className="brand" to="/" end aria-label="MANSOUR - الصفحة الرئيسية">
                         <img src={logo} alt="لوجو منصور" />
